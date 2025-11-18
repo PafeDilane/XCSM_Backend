@@ -73,13 +73,21 @@ WSGI_APPLICATION = 'xcms_project.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+# xcsm_project/settings.py
+
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'xcsm_db',      # Le nom exact de la base créée dans Workbench
+        'USER': 'root',         # Ton utilisateur MySQL (souvent 'root' par défaut)
+        'PASSWORD': 'rodestellE()@*123#',         # Ton mot de passe (souvent vide en local, sinon mets le tien)
+        'HOST': '127.0.0.1',    # Localhost
+        'PORT': '3306',         # Port standard MySQL
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+        },
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
