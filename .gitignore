@@ -1,1 +1,3 @@
-
+# Exclusion de l'environnement virtuel Python
+venv/
+env/
