@@ -37,18 +37,35 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'xcsm',
+    'xcsm',  # Notre application métier
+    'rest_framework',   # Ajout de Django REST Framework
+    'corsheaders',      # Pour la communication Front/Back avec NextJS
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    
+    'corsheaders.middleware.CorsMiddleware',           # AJOUTER: Doit être très haut
+    
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+# Configuration CORS (POUR LE DÉVELOPPEMENT)
+CORS_ALLOW_ALL_ORIGINS = True # Permet à n'importe quel frontend (localhost) de se connecter
+
+
+# Configuration par défaut de l'API (DRF)
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated', # Exige l'authentification par défaut
+    ]
+}
+
 
 ROOT_URLCONF = 'xcsm_project.urls'
 
@@ -67,7 +84,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'xcms_project.wsgi.application'
+WSGI_APPLICATION = 'xcsm_project.wsgi.application'
 
 
 # Database
