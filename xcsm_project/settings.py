@@ -40,6 +40,9 @@ INSTALLED_APPS = [
     'xcsm',  # Notre application métier
     'rest_framework',   # Ajout de Django REST Framework
     'corsheaders',      # Pour la communication Front/Back avec NextJS
+    
+    'drf_yasg',
+
 ]
 
 MIDDLEWARE = [

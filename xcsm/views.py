@@ -8,6 +8,12 @@ from .serializers import FichierSourceSerializer
 from .processing import process_and_store_document
 from .permissions import IsEnseignant
 
+
+
+from rest_framework.parsers import MultiPartParser, FormParser # AJOUT CRITIQUE
+
+
+
 class DocumentUploadView(generics.CreateAPIView):
     """
     API pour l'upload de documents (PDF/DOCX) et le lancement du processus de transformation.
@@ -15,6 +21,11 @@ class DocumentUploadView(generics.CreateAPIView):
     """
     serializer_class = FichierSourceSerializer
     permission_classes = [IsEnseignant] # Seuls les Enseignants peuvent accéder
+
+
+    # AJOUTER CETTE LIGNE : Indique à DRF et Swagger d'accepter les fichiers
+    parser_classes = (MultiPartParser, FormParser)
+
 
     def perform_create(self, serializer):
         user = self.request.user
