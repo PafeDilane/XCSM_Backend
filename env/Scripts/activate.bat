@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=C:\Users\HP\Desktop\4GI\IHM\PROJET IHM\XCMS_Backend\env
+set VIRTUAL_ENV=C:\Users\HP\Desktop\4GI\IHM\PROJET IHM\XCSM_Backend\env
 
 if not defined PROMPT set PROMPT=$P$G
 
