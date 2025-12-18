@@ -115,18 +115,6 @@
 #     return post_process_semantic_html(f"<html><body>{semantic_parts}</body></html>")
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 # # ==============================================================================
 # # 3. MOTEUR DE DÉCOUPAGE (GRANULATION)
 # # ==============================================================================
@@ -247,14 +235,6 @@
 #             ordres['granule'] += 1
 
 #     return cours
-
-
-
-
-
-
-
-
 
 # # ==============================================================================
 # # 3. ORCHESTRATEUR (INCHANGÉ)
@@ -478,9 +458,11 @@ def process_and_store_document(fichier_source_instance):
 
         mdb = get_mongo_db()
         mdb['fichiers_uploades'].insert_one({
-            "fichier_id": str(fichier_source_instance.id),
-            "html_complet": html,
-            "date": fichier_source_instance.date_upload.isoformat()
+           "fichier_source_id": str(fichier_source_instance.id),
+            "titre": fichier_source_instance.titre,
+            "type_original": file_extension.upper(),
+            "contenu_transforme": semantic_html,
+            "date_traitement": fichier_source_instance.date_upload.isoformat()
         })
         
         cours = split_and_create_granules(fichier_source_instance, html)
