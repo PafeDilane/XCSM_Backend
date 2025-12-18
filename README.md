@@ -1593,7 +1593,7 @@ Département de Génie Informatique
 -  **Site web** : *À venir*  
   *(Plateforme de démonstration et documentation utilisateur)*
 
-### Licence
+### Licence NADA 
 
 **Projet académique à but pédagogique**
 
