@@ -2080,8 +2080,8 @@ Tout contexte ou capture d'écran utile.
 
 Ce projet a été développé par une équipe passionnée d'étudiants en 4ème année de Génie Informatique :
 
-- **BrianBrusly**
 - **PafeDilane**
+- **BrianBrusly**
 - **ROLAINTCHAPET**
 - **BraunManfouo**
 
@@ -2134,7 +2134,7 @@ Pour toute utilisation commerciale ou redistribution, veuillez contacter l'équi
 Si vous utilisez ce projet dans vos travaux académiques, veuillez le citer comme suit :
 
 ```bibtex
-@software{xcsm_backend_2025,
+@software{xcsm_backend,
   title={XCSM Backend - API de Traitement et Structuration de Contenus Pédagogiques},
   author={Team 4GI ENSP Promo 2027},
   year={2025},
@@ -2237,21 +2237,84 @@ Si vous utilisez ce projet dans vos travaux académiques, veuillez le citer comm
 Voici les versions exactes des dépendances principales du projet. Ces versions ont été testées et validées ensemble :
 
 ```txt
+# ============================================
+# XCSM BACKEND - DEPENDANCES COMPLÈTES
+# ============================================
+
+# CORE DJANGO & REST API
+asgiref==3.10.0
 Django==5.2.8
-djangorestframework==3.15.0
+djangorestframework==3.16.1
+django-cors-headers==4.9.0
+
+# DATABASES
+mysqlclient==2.2.7
+pymongo==4.15.4
+sqlparse==0.5.3
+redis==5.2.1
+
+# DOCUMENT PROCESSING (Cœur de XCSM)
+PyMuPDF==1.26.6
+mammoth==1.11.0
+beautifulsoup4==4.12.3
+lxml==5.3.1
+pillow==12.0.0
+dnspython==2.8.0
+
+# ASYNC TASKS & QUEUING
+celery==5.4.0
+
+# API DOCUMENTATION & TOOLS
 drf-yasg==1.21.7
-django-cors-headers==4.3.1
-PyMuPDF==1.23.0
-mammoth==1.6.0
-python-docx==1.1.0
-beautifulsoup4==4.12.2
-pymongo==4.6.0
-mysqlclient==2.2.0
-redis==5.0.1
-celery==5.3.4
+python-dotenv==1.0.1
+django-filter==24.3
+
+# ADMIN & UTILITIES
+django-import-export==4.3.14
+
+# AUTHENTICATION
+djangorestframework-simplejwt==5.4.0
+
+# EMAIL & NOTIFICATIONS
+django-templated-mail==1.1.1
+django-post-office==3.9.0
+
+# TESTING & QUALITY
+pytest==8.3.4
+pytest-django==4.9.0
+coverage==7.6.7
+
+# PRODUCTION READY
 gunicorn==21.2.0
-python-dotenv==1.0.0
-Pillow==10.2.0
+whitenoise==6.9.0
+
+# INTERNATIONALIZATION
+tzdata==2025.2
+
+# DEV EXPERIENCE & PRODUCTIVITÉ
+
+# Extensions Django utiles en développement
+# - shell_plus (shell amélioré)
+# - show_urls (liste des routes)
+# - runserver_plus (debug avancé)
+django-extensions==3.2.3
+
+# Shell Python avancé (autocomplete, debug, introspection)
+# Utilisé automatiquement par django-extensions (shell_plus)
+ipython==8.30.0
+
+# SÉCURITÉ API
+
+# Limitation de taux (rate limiting) pour les endpoints API
+# Protection contre brute force et abus
+django-ratelimit==4.1.0
+
+# OBSERVABILITÉ & MONITORING
+
+# Monitoring des erreurs et exceptions en production
+# Envoi automatique des crashs vers Sentry
+sentry-sdk==2.19.2
+
 ```
 
 ### Problèmes Courants et Solutions
