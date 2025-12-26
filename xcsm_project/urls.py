@@ -57,15 +57,15 @@ from xcsm_project.views import home
 # ------------------------------------------------------------
 schema_view = get_schema_view(
    openapi.Info(
-      title="XCSM API",
+      title="XCSM Backend API",
       default_version='v1',
-      description="Documentation des endpoints du projet XCSM",
-      terms_of_service="https://www.google.com/policies/terms/",
-      contact=openapi.Contact(email="contact@monapi.local"),
-      license=openapi.License(name="BSD License"),
+      description="API de traitement et structuration de contenus pédagogiques",
+      terms_of_service="https://xcsm.edu/terms/",
+      contact=openapi.Contact(email="contact@xcsm.edu"),
+      license=openapi.License(name="Academic License"),
    ),
    public=True,
-   permission_classes=(permissions.AllowAny,),
+   permission_classes=[permissions.AllowAny],
 )
 
 # ------------------------------------------------------------
@@ -92,6 +92,8 @@ urlpatterns = [
    # --------------------------------------------------------
    # JSON/YAML
    re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
+   # Format JSON simple (pour compatibilité)
+   path('swagger.json', schema_view.without_ui(cache_timeout=0), name='schema-json-simple'),
    # Swagger UI
    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
    # Redoc
@@ -99,7 +101,15 @@ urlpatterns = [
 ]
 
 # ------------------------------------------------------------
-# Servir les fichiers médias (documents bruts) UNIQUEMENT en mode DEBUG
+# Servir les fichiers médias (documents bruts) en développement
 # ------------------------------------------------------------
 if settings.DEBUG:
    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+   urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+
+   # Debug toolbar (seulement en développement si installée)
+   try:
+      import debug_toolbar
+      urlpatterns += [path('__debug__/', include(debug_toolbar.urls))]
+   except ImportError:
+      pass
