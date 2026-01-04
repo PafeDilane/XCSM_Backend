@@ -1,0 +1,54 @@
+{
+  "project": "XCSM",
+  "date": "2026-01-04",
+  "base_url": "http://localhost:8000/api/v1",
+  "results": [
+    {
+      "test": "Connexion au serveur",
+      "success": false,
+      "details": "Impossible de se connecter: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/v1/auth/verify/ (Caused by NewConnectionError(\"HTTPConnection(host='localhost', port=8000): Failed to establish a new connection: [Errno 111] Connection refused\"))",
+      "timestamp": "2026-01-04 15:09:48"
+    },
+    {
+      "test": "Inscription utilisateur",
+      "success": false,
+      "details": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/v1/auth/register/ (Caused by NewConnectionError(\"HTTPConnection(host='localhost', port=8000): Failed to establish a new connection: [Errno 111] Connection refused\"))",
+      "timestamp": "2026-01-04 15:09:48"
+    },
+    {
+      "test": "Connexion utilisateur",
+      "success": false,
+      "details": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/v1/auth/login/ (Caused by NewConnectionError(\"HTTPConnection(host='localhost', port=8000): Failed to establish a new connection: [Errno 111] Connection refused\"))",
+      "timestamp": "2026-01-04 15:09:49"
+    },
+    {
+      "test": "Rafraîchissement token",
+      "success": false,
+      "details": "Refresh token non disponible",
+      "timestamp": "2026-01-04 15:09:49"
+    },
+    {
+      "test": "Accès endpoint protégé",
+      "success": false,
+      "details": "Access token non disponible",
+      "timestamp": "2026-01-04 15:09:50"
+    },
+    {
+      "test": "Upload avec authentification",
+      "success": false,
+      "details": "Access token non disponible",
+      "timestamp": "2026-01-04 15:09:50"
+    },
+    {
+      "test": "Déconnexion",
+      "success": false,
+      "details": "Tokens non disponibles",
+      "timestamp": "2026-01-04 15:09:51"
+    }
+  ],
+  "summary": {
+    "total": 7,
+    "passed": 0,
+    "failed": 7
+  }
+}

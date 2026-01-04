@@ -150,6 +150,9 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, data):
+        """
+        Validation des données d'inscription
+        """
         if data['password'] != data['confirm_password']:
             raise serializers.ValidationError(
                 {"password": "Les mots de passe ne correspondent pas."}
@@ -168,29 +171,38 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
+        """
+        Création d'un utilisateur avec son type de compte
+        """
         validated_data.pop('confirm_password')
         password = validated_data.pop('password')
+        type_compte = validated_data.pop('type_compte')
 
-        user = Utilisateur.objects.create_user(
+        # Création de l'utilisateur
+        user = self.Meta.model.objects.create_user(
             **validated_data,
-            password=password
+            password=password,
+            type_compte=type_compte
         )
 
         # Création du profil spécifique
-        if user.type_compte == 'ENSEIGNANT':
+        if type_compte == 'ENSEIGNANT':
+            from .models import Enseignant
             Enseignant.objects.create(
                 utilisateur=user,
                 specialite="À définir",
                 departement="À définir"
             )
-        elif user.type_compte == 'ETUDIANT':
+        elif type_compte == 'ETUDIANT':
+            from .models import Etudiant
             Etudiant.objects.create(
                 utilisateur=user,
                 matricule=f"ETU-{str(user.id)[:8].upper()}",
                 niveau="À définir",
                 filiere="À définir"
             )
-        elif user.type_compte == 'ADMIN':
+        elif type_compte == 'ADMIN':
+            from .models import Administrateur
             Administrateur.objects.create(
                 utilisateur=user,
                 role_admin="Administrateur",

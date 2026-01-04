@@ -3,7 +3,7 @@ Django settings for xcsm_project.
 
 Backend XCSM – configuration développement
 Django 5.2.x
-MySQL via XAMPP (connexion TCP)
+MySQL via XAMPP / MariaDB Syst + PhpMyAdmin indépendant en cas de conflits de versions (connexion TCP)
 
 Ce fichier combine les configurations des deux fichiers sources,
 avec une sécurité optimale pour l'environnement de développement.
