@@ -8,10 +8,14 @@ from django.contrib.auth.models import AbstractUser
 # ==============================================================================
 
 class Utilisateur(AbstractUser):
+
     """
     Classe Mère correspondante à 'Utilisateur' sur le diagramme.
     Hérite d'AbstractUser pour la gestion sécu (mot de passe, login, is_active).
+
     """
+    is_active = models.BooleanField(default=True)
+
     # Attributs du Diagramme
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # email, password, nom, prenom, date_creation, last_login, is_active sont gérés par AbstractUser

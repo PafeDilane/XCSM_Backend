@@ -25,7 +25,9 @@ from .views_auth import (
     LogoutView,
     UserProfileView,
     ChangePasswordView,
-    VerifyTokenView
+    VerifyTokenView,
+    DeleteAccountView,
+    DeactivateAccountView
 )
 
 # Import des vues principales (existant déjà)
@@ -52,7 +54,7 @@ try:
     NOTIFICATIONS_AVAILABLE = True
 except ImportError:
     NOTIFICATIONS_AVAILABLE = False
-    print("⚠️  Module notifications non disponible - Les endpoints de notifications seront désactivés")
+    print("Module notifications non disponible - Les endpoints de notifications seront désactivés")
 
 # =============================================================================
 # ROUTER POUR LES VIEWSETS
@@ -102,6 +104,20 @@ urlpatterns = [
 
     # GET /api/v1/auth/verify/ - Vérification de la validité d'un token
     path('auth/verify/', VerifyTokenView.as_view(), name='auth-verify'),
+
+    # Suppression de compte
+    path(
+        'auth/delete-account/',
+        DeleteAccountView.as_view(),
+        name='auth-delete-account'
+    ),
+
+    # Désactivation de compte
+    path(
+        'auth/deactivate-account/',
+        DeactivateAccountView.as_view(),
+        name='auth-deactivate-account'
+    ),
 
     # =========================================================================
     # SECTION 1 : GESTION DES DOCUMENTS

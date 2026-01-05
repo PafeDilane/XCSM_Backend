@@ -1,0 +1,12 @@
+{
+  "user_id": "559671dd-69a3-4b60-a507-3bca39864cd0",
+  "username": "test.enseignant",
+  "email": "test.enseignant@gmail.com",
+  "type_compte": "ENSEIGNANT",
+  "date_creation": "2026-01-05T07:15:34.742416+00:00",
+  "deletion_date": "2026-01-05T11:46:11.492348+00:00",
+  "statistics": {
+    "documents_count": 4,
+    "courses_count": 0
+  }
+}

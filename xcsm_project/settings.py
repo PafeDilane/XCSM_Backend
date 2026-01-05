@@ -8,7 +8,7 @@ MySQL via XAMPP / MariaDB Syst + PhpMyAdmin indépendant en cas de conflits de v
 Ce fichier combine les configurations des deux fichiers sources,
 avec une sécurité optimale pour l'environnement de développement.
 """
-
+import sys
 from pathlib import Path
 import os
 
@@ -72,7 +72,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
 
-    # Middleware CORS (doit être placé avant CommonMiddleware)
+    # Middleware CORS
     'corsheaders.middleware.CorsMiddleware',
 
     'django.middleware.common.CommonMiddleware',
@@ -158,8 +158,25 @@ DATABASES = {
             'charset': 'utf8mb4',
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
         },
+    },
+    # Base de test dédiée
+    'test': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'test_xcsm_db',  # Base créée avec root
+        'USER': 'xcsm_admin',
+        'PASSWORD': 'xcsm.4gi.enspy27',
+        'HOST': '127.0.0.1',
+        'PORT': '3306',
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+        },
     }
 }
+
+# Indiquer à Django d'utiliser la base test pour les tests
+if 'test' in sys.argv:
+    DATABASES['default'] = DATABASES['test']
 
 
 # ================================================================

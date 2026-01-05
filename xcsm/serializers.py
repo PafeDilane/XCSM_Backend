@@ -3,7 +3,7 @@
 # from .models import FichierSource
 
 # class FichierSourceSerializer(serializers.ModelSerializer):
-    
+
 #     """ Sérialiseur pour la classe FichierSource (Upload) """
 #     class Meta:
 #         model = FichierSource
@@ -182,7 +182,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         user = self.Meta.model.objects.create_user(
             **validated_data,
             password=password,
-            type_compte=type_compte
+            type_compte=type_compte,
+            is_active=True
         )
 
         # Création du profil spécifique
@@ -197,7 +198,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             from .models import Etudiant
             Etudiant.objects.create(
                 utilisateur=user,
-                matricule=f"ETU-{str(user.id)[:8].upper()}",
+                matricule="À définir",
                 niveau="À définir",
                 filiere="À définir"
             )
@@ -271,3 +272,48 @@ class AdministrateurProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = Administrateur
         fields = ('role_admin', 'permissions')
+
+
+class AccountDeletionSerializer(serializers.Serializer):
+    """
+    Serializer pour la validation de la suppression de compte.
+    """
+    password = serializers.CharField(
+        write_only=True,
+        required=True,
+        style={'input_type': 'password'},
+        help_text="Mot de passe actuel pour confirmation"
+    )
+
+    confirmation = serializers.CharField(
+        required=True,
+        help_text="Écrivez 'JE_SUPPRIME_MON_COMPTE' pour confirmer"
+    )
+
+    def validate_confirmation(self, value):
+        """
+        Valide la phrase de confirmation.
+        """
+        if value != "JE_SUPPRIME_MON_COMPTE":
+            raise serializers.ValidationError(
+                "Vous devez écrire exactement 'JE_SUPPRIME_MON_COMPTE' pour confirmer la suppression."
+            )
+        return value
+
+
+class AccountDeactivationSerializer(serializers.Serializer):
+    """
+    Serializer pour la validation de la désactivation de compte.
+    """
+    password = serializers.CharField(
+        write_only=True,
+        required=True,
+        style={'input_type': 'password'},
+        help_text="Mot de passe actuel pour confirmation"
+    )
+
+    reason = serializers.CharField(
+        required=False,
+        max_length=500,
+        help_text="Raison de la désactivation (optionnel)"
+    )
