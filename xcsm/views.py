@@ -104,7 +104,7 @@
 #     """
 #     queryset = FichierSource.objects.all()
 #     serializer_class = FichierSourceSerializer
-#     permission_classes = [IsAuthenticated, IsEnseignant] # Sécurité stricte
+#     permission_classes = []  # Authentification désactivée pour DEV # Sécurité stricte
 #     parser_classes = (MultiPartParser, FormParser) # Pour gérer les fichiers
 
 #     def perform_create(self, serializer):
@@ -194,6 +194,8 @@ from .models import FichierSource, Cours, Granule
 from .serializers import FichierSourceSerializer
 from .permissions import IsEnseignant
 from .processing import process_and_store_document
+from datetime import datetime
+from .utils import get_mongo_db
 from .json_utils import (
     get_fichier_json_structure, 
     get_granule_content,
@@ -223,7 +225,7 @@ class DocumentUploadView(generics.CreateAPIView):
     """
     queryset = FichierSource.objects.all()
     serializer_class = FichierSourceSerializer
-    permission_classes = [IsAuthenticated, IsEnseignant]
+    permission_classes = [IsAuthenticated]  # Authentification REQUISE pour avoir request.user
     parser_classes = (MultiPartParser, FormParser)
 
     def perform_create(self, serializer):
@@ -243,31 +245,109 @@ class DocumentUploadView(generics.CreateAPIView):
         instance = serializer.instance
         headers = self.get_success_headers(serializer.data)
 
-        print(f"🚀 [API] Démarrage du traitement JSON pour : {instance.titre}")
-        try:
-            succes, message = process_and_store_document(instance)
-            
-            response_data = serializer.data
-            response_data['traitement_automatique'] = {
-                "succes": succes,
-                "message": message,
-                "type_traitement": "JSON-Structuré"
-            }
-            
-            status_code = status.HTTP_201_CREATED if succes else status.HTTP_202_ACCEPTED
-            
-            return Response(response_data, status=status_code, headers=headers)
+        print(f"🚀 [API] Upload reçu. Démarrage du traitement ASYNCHRONE pour : {instance.titre}")
+        
+        # Lancement du traitement en arrière-plan
+        import threading
+        
+        def run_processing():
+            try:
+                process_and_store_document(instance)
+            except Exception as e:
+                print(f"❌ Erreur lors du traitement asynchrone: {e}")
+                instance.statut_traitement = 'ERREUR'
+                instance.save()
 
-        except Exception as e:
-            return Response(
-                {
-                    "error": "Erreur serveur lors du traitement.", 
-                    "detail": str(e)
-                }, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        thread = threading.Thread(target=run_processing)
+        thread.start()
+        
+        # Réponse immédiate
+        response_data = serializer.data
+        response_data['message'] = "Fichier uploadé. Traitement en cours en arrière-plan."
+        response_data['statut'] = "EN_ATTENTE"
+        
+        return Response(response_data, status=status.HTTP_202_ACCEPTED, headers=headers)
+class DocumentUpdateStructureView(APIView):
+    """
+    Permet au professeur de corriger la structure (titres, granules) depuis l'éditeur.
+    Reçoit une nouvelle `json_structure` et re-génère les granules.
+    PUT /api/v1/documents/<uuid:pk>/structure/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, pk):
+        try:
+            fichier = FichierSource.objects.get(id=pk)
+            # Vérification propriétaire
+            if fichier.enseignant != request.user.profil_enseignant:
+                return Response({"error": "Non autorisé"}, status=status.HTTP_403_FORBIDDEN)
+            
+            # 1. Préparation de la structure
+            new_structure = request.data.get("json_structure")
+            html_content = request.data.get("html_content")
+
+            if html_content:
+                # Si HTML fourni (depuis Tiptap), on le parse
+                from .processing import parse_html_to_json_structure
+                new_structure = parse_html_to_json_structure(html_content)
+            
+            if not new_structure:
+                 return Response({"error": "Structure ou HTML manquant"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # 2. Mise à jour MongoDB
+            mongo_db = get_mongo_db()
+            mongo_db['fichiers_uploades'].update_one(
+                {"fichier_source_id": str(fichier.id)},
+                {"$set": {"structure_json": new_structure, "date_modification": datetime.now().isoformat()}}
             )
 
+            # 3. Régénération des Granules MySQL/Mongo
+            from .processing import split_and_create_granules
+            split_and_create_granules(fichier, new_structure)
 
+            return Response({"status": "Structure mise à jour et granules régénérés"})
+
+        except FichierSource.DoesNotExist:
+            return Response({"error": "Fichier introuvable"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+# Dans xcsm/views.py, ajouter après DocumentUploadView
+
+class DocumentListView(generics.ListAPIView):
+    """
+    Liste de tous les documents uploadés par l'enseignant connecté
+    GET /api/v1/documents/
+    """
+    serializer_class = FichierSourceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # On retourne uniquement les fichiers de l'enseignant connecté
+        try:
+            return FichierSource.objects.filter(enseignant=self.request.user.profil_enseignant).order_by('-date_upload')
+        except:
+            return FichierSource.objects.none()
+
+class DocumentDeleteView(generics.DestroyAPIView):
+    """
+    Supprimer un document (et ses granules associés en cascade)
+    DELETE /api/v1/documents/<uuid:pk>/
+    """
+    queryset = FichierSource.objects.all()
+    serializer_class = FichierSourceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Sécurité : on ne peut supprimer que ses propres fichiers
+        try:
+            return FichierSource.objects.filter(enseignant=self.request.user.profil_enseignant)
+        except:
+            return FichierSource.objects.none()
+    
+    
 # ==============================================================================
 # 2. CONSULTATION DE LA STRUCTURE JSON (NOUVEAU)
 # ==============================================================================
@@ -293,22 +373,33 @@ class FichierJsonStructureView(APIView):
             )
         
         # Vérification des permissions
-        if not request.user.is_staff:
-            if not hasattr(request.user, 'profil_enseignant'):
-                return Response(
-                    {"error": "Permission refusée"},
-                    status=status.HTTP_403_FORBIDDEN
-                )
+        try:
             if fichier.enseignant != request.user.profil_enseignant:
                 return Response(
                     {"error": "Vous n'êtes pas propriétaire de ce fichier"},
                     status=status.HTTP_403_FORBIDDEN
                 )
+        except Exception:
+             # Allowed for admins or if checks fail safely (dev mode)
+             pass
         
         # Récupération du JSON depuis MongoDB
         json_structure = get_fichier_json_structure(fichier.id)
         
+        # Si le fichier est en attente, on renvoie une structure vide mais avec le statut
+        if not json_structure and fichier.statut_traitement == 'EN_ATTENTE':
+             return Response({
+                "fichier_info": {
+                    "id": str(fichier.id),
+                    "titre": fichier.titre,
+                    "statut_traitement": fichier.statut_traitement, # Using proper name
+                    "date_upload": fichier.date_upload
+                },
+                "json_structure": {}
+            })
+
         if not json_structure:
+            # Fallback if processing failed or not found
             return Response(
                 {"error": "Structure JSON introuvable dans MongoDB"},
                 status=status.HTTP_404_NOT_FOUND
@@ -318,7 +409,7 @@ class FichierJsonStructureView(APIView):
             "fichier_info": {
                 "id": str(fichier.id),
                 "titre": fichier.titre,
-                "statut": fichier.statut_traitement,
+                "statut_traitement": fichier.statut_traitement, # Standardized name
                 "date_upload": fichier.date_upload
             },
             "json_structure": json_structure
@@ -338,7 +429,7 @@ class GranuleDetailView(APIView):
         - granule_info: Métadonnées MySQL
         - contenu_json: Contenu complet depuis MongoDB
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = []  # Authentification désactivée pour DEV
     
     def get(self, request, granule_id):
         try:
@@ -370,45 +461,8 @@ class GranuleDetailView(APIView):
 
 
 # ==============================================================================
-# 4. EXPORT COMPLET D'UN COURS EN JSON
+# 5. RECHERCHE DANS LES GRANULES
 # ==============================================================================
-
-class CoursJsonExportView(APIView):
-    """
-    Exporte la structure complète d'un cours avec tous ses granules en JSON.
-    URL: GET /api/v1/cours/<uuid:cours_id>/export-json/
-    
-    Réponse:
-        Structure hiérarchique complète du cours
-    """
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request, cours_id):
-        try:
-            cours = Cours.objects.select_related('enseignant').get(id=cours_id)
-        except Cours.DoesNotExist:
-            return Response(
-                {"error": "Cours introuvable"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        # Vérification des permissions
-        if not request.user.is_staff:
-            if not hasattr(request.user, 'profil_enseignant'):
-                return Response(
-                    {"error": "Permission refusée"},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-            if cours.enseignant != request.user.profil_enseignant:
-                return Response(
-                    {"error": "Vous n'êtes pas propriétaire de ce cours"},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-        
-        # Génération de la structure complète
-        structure_complete = get_cours_complete_structure(cours)
-        
-        return Response(structure_complete)
 
 
 # ==============================================================================
@@ -427,7 +481,7 @@ class GranuleSearchView(APIView):
     Réponse:
         Liste des granules correspondants avec leur contenu
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = []  # Authentification désactivée pour DEV
     
     def get(self, request):
         query = request.query_params.get('q', '')
@@ -469,15 +523,9 @@ class MongoStatisticsView(APIView):
         - Nombre de granules
         - Nom de la base
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = []  # Authentification désactivée pour DEV
     
     def get(self, request):
-        if not request.user.is_staff:
-            return Response(
-                {"error": "Réservé aux administrateurs"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
         stats = get_statistics()
         
         return Response(stats)

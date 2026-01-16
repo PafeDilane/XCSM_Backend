@@ -289,199 +289,6 @@
 
 
 
-
-
-
-
-
-# # xcsm/processing.py - V4.0 : VERSION CORRIGÉE (Suppression champs invalides)
-# import fitz  # PyMuPDF
-# import os
-# import re
-# import mammoth
-# from bs4 import BeautifulSoup, NavigableString
-# from django.db import transaction
-# from .utils import get_mongo_db
-# # Imports des modèles MySQL pour la hiérarchie
-# from .models import Cours, Partie, Chapitre, Section, SousSection, Granule
-
-# # ==============================================================================
-# # 1. OUTILS DE NETTOYAGE ET CONVERSION
-# # ==============================================================================
-
-# def post_process_semantic_html(raw_html: str) -> str:
-#     """ Nettoie le HTML et force le découpage ligne par ligne. """
-#     soup = BeautifulSoup(raw_html, 'html.parser')
-#     new_body = ""
-    
-#     content_source = soup.body.contents if soup.body else soup.contents
-    
-#     for element in content_source:
-#         if element.name is None:
-#             text = str(element).strip()
-#             if text: new_body += f"<p>{text}</p>\n"
-#             continue
-            
-#         tag = element.name
-#         text = element.get_text().strip()
-#         if not text: continue
-        
-#         if tag in ['h1', 'h2', 'h3', 'h4']:
-#             new_body += f"<{tag}>{text}</{tag}>\n"
-#         elif tag in ['p', 'li', 'ul', 'ol', 'div']:
-#             lines = [line.strip() for line in text.split('\n') if line.strip()]
-#             for line in lines:
-#                 clean = re.sub(r'[\u00A0\t ]+', ' ', line).strip()
-#                 if clean: new_body += f"<p>{clean}</p>\n"
-#         else:
-#             new_body += str(element) + "\n"
-
-#     return f"<html><body>\n{new_body}</body></html>"
-
-# def convert_docx_to_semantic_html(file_path):
-#     style_map = """
-#     p[style-name='Title'] => h1:fresh
-#     p[style-name='Heading 1'] => h1:fresh
-#     p[style-name='Heading 2'] => h2:fresh
-#     p[style-name='Heading 3'] => h3:fresh
-#     p => p:fresh
-#     """
-#     with open(file_path, 'rb') as f:
-#         res = mammoth.convert_to_html(f, style_map=style_map)
-#     return post_process_semantic_html(f"<html><body>{res.value}</body></html>")
-
-# def convert_pdf_to_semantic_html(file_path):
-#     doc = fitz.open(file_path)
-#     text = ""
-#     for p in doc: text += p.get_text("text") + "\n\n--- PAGE BREAK ---\n\n"
-    
-#     parts = ""
-#     for block in re.split(r'\n\s*\n', text):
-#         block = block.strip()
-#         if not block or '--- PAGE' in block: continue
-        
-#         is_single = len(block.split('\n')) == 1 and len(block) < 150
-#         is_h1 = is_single and block.isupper()
-#         is_h2 = is_single and (re.match(r'^[IVX0-9]+\.', block) or block.endswith(':'))
-        
-#         if is_h1: parts += f"<h1>{block}</h1>\n"
-#         elif is_h2: parts += f"<h2>{block}</h2>\n"
-#         else: parts += f"<p>{block}</p>\n"
-            
-#     return post_process_semantic_html(f"<html><body>{parts}</body></html>")
-
-# # ==============================================================================
-# # 2. MOTEUR DE DÉCOUPAGE (CORRECTION DU BUG 'Matiere/Niveau')
-# # ==============================================================================
-
-# def split_and_create_granules(fichier_source, html_content):
-#     mongo_db = get_mongo_db()
-#     granules_col = mongo_db['granules']
-#     soup = BeautifulSoup(html_content, 'html.parser')
-    
-#     # A. NETTOYAGE
-#     Granule.objects.filter(fichier_source=fichier_source).delete()
-    
-#     # B. CRÉATION DU COURS (CORRIGÉ)
-#     # Suppression de 'matiere' et 'niveau' qui n'existent pas dans models.py
-#     code_unique = f"C-{fichier_source.id.hex[:6].upper()}"
-#     cours, _ = Cours.objects.get_or_create(
-#         code=code_unique,
-#         defaults={
-#             'enseignant': fichier_source.enseignant,
-#             'titre': fichier_source.titre,
-#             'description': "Généré automatiquement par XCSM",
-#             'est_publie': False
-#             # 'matiere' et 'niveau' RETIRÉS CAR ABSENTS DU MODÈLE
-#         }
-#     )
-#     Partie.objects.filter(cours=cours).delete()
-    
-#     # C. INITIALISATION
-#     partie = Partie.objects.create(cours=cours, titre="Contenu Principal", numero=1)
-#     chapitre = Chapitre.objects.create(partie=partie, titre="Introduction", numero=1)
-#     section = Section.objects.create(chapitre=chapitre, titre="Généralités", numero=1)
-#     sous_section = SousSection.objects.create(section=section, titre="Contenu", numero=1)
-    
-#     cpt = {'chap': 1, 'sec': 1, 'granule': 1}
-
-#     # D. BOUCLE
-#     root = soup.body if soup.body else soup
-#     for el in root.contents:
-#         if el.name is None: continue
-#         tag = el.name
-#         text = el.get_text().strip()
-#         if not text: continue
-
-#         if tag == 'h1':
-#             cpt['chap'] += 1
-#             chapitre = Chapitre.objects.create(partie=partie, titre=text[:190], numero=cpt['chap'])
-#             section = Section.objects.create(chapitre=chapitre, titre="Début", numero=1)
-#             sous_section = SousSection.objects.create(section=section, titre="Contenu", numero=1)
-#             cpt['sec'] = 1
-
-#         elif tag == 'h2':
-#             cpt['sec'] += 1
-#             section = Section.objects.create(chapitre=chapitre, titre=text[:190], numero=cpt['sec'])
-#             sous_section = SousSection.objects.create(section=section, titre="Contenu", numero=1)
-
-#         elif tag in ['p', 'li', 'div', 'h3', 'h4']:
-#             doc_mongo = {'html': str(el), 'text': text, 'fichier_id': str(fichier_source.id), 'type': 'TEXTE'}
-#             res = granules_col.insert_one(doc_mongo)
-            
-#             Granule.objects.create(
-#                 sous_section=sous_section,
-#                 fichier_source=fichier_source,
-#                 titre=text[:45] + "..." if len(text)>45 else text,
-#                 type_contenu="TEXTE",
-#                 mongo_contenu_id=str(res.inserted_id),
-#                 ordre=cpt['granule']
-#             )
-#             cpt['granule'] += 1
-            
-#     return cours
-
-# # ==============================================================================
-# # 3. ORCHESTRATEUR
-# # ==============================================================================
-
-# def process_and_store_document(fichier_source_instance):
-#     try:
-#         path = fichier_source_instance.fichier_original.path
-#         ext = os.path.splitext(path)[1].lower().strip('.')
-        
-#         if ext == 'docx': html = convert_docx_to_semantic_html(path)
-#         elif ext == 'pdf': html = convert_pdf_to_semantic_html(path)
-#         else: html = post_process_semantic_html(f"<html><body><p>{open(path, encoding='utf-8').read()}</p></body></html>")
-        
-#         if len(html) < 20: raise ValueError("HTML vide.")
-
-#         mdb = get_mongo_db()
-#         mdb['fichiers_uploades'].insert_one({
-#            "fichier_source_id": str(fichier_source_instance.id),
-#             "titre": fichier_source_instance.titre,
-#             "type_original": file_extension.upper(),
-#             "contenu_transforme": semantic_html,
-#             "date_traitement": fichier_source_instance.date_upload.isoformat()
-#         })
-        
-#         cours = split_and_create_granules(fichier_source_instance, html)
-        
-#         with transaction.atomic():
-#             fichier_source_instance.statut_traitement = 'TRAITE'
-#             fichier_source_instance.save()
-            
-#         return True, f"Cours généré : {cours.titre} ({cours.code})"
-        
-#     except Exception as e:
-#         import traceback
-#         traceback.print_exc()
-#         return False, str(e)
-
-
-
-
-
 # xcsm/processing.py - Version JSON Structuré (Refonte Complète)
 import fitz  # PyMuPDF
 import os
@@ -490,7 +297,10 @@ import mammoth
 from bs4 import BeautifulSoup
 from django.db import transaction
 from .utils import get_mongo_db
-from .models import Cours, Partie, Chapitre, Section, SousSection, Granule
+from .models import (
+    Cours, Partie, Chapitre, Section, SousSection, Granule,
+    Exercice, Question, Reponse, Tag, Categorie, Organisation
+)
 from datetime import datetime
 
 # ==============================================================================
@@ -518,35 +328,114 @@ def extract_structure_from_docx(file_path):
 
 def extract_structure_from_pdf(file_path):
     """
-    Convertit un PDF en JSON structuré avec détection de hiérarchie.
+    ANALYSE AVANCÉE PDF : Utilise la taille et le style des polices pour identifier la structure.
     """
     doc = fitz.open(file_path)
-    raw_text = ""
     
+    # 1. ANALYSE STATISTIQUE DES POLICES
+    # On récupère toutes les tailles de police du document pour trouver la "taille du corps"
+    font_sizes = []
     for page in doc:
-        raw_text += page.get_text("text") + "\n\n--- PAGE BREAK ---\n\n"
+        blocks = page.get_text("dict")["blocks"]
+        for b in blocks:
+            if "lines" in b: # Bloc de texte
+                for l in b["lines"]:
+                    for s in l["spans"]:
+                        if s["text"].strip():
+                            font_sizes.append(round(s["size"], 1))
     
-    # Construction du HTML intermédiaire pour réutiliser le parser
+    # La taille la plus fréquente est probablement le corps de texte
+    if not font_sizes:
+         return parse_html_to_json_structure("<html><body><p>Document Vide</p></body></html>")
+         
+    from collections import Counter
+    size_distribution = Counter(font_sizes)
+    body_font_size = size_distribution.most_common(1)[0][0]
+    
+    print(f"📊 Analyse PDF : Taille du corps détectée = {body_font_size}pt")
+    
     html_parts = ""
-    for block in re.split(r'\n\s*\n', raw_text):
+    
+    # 2. EXTRACTION ET CLASSIFICATION
+    for page_num, page in enumerate(doc, 1):
+        blocks = page.get_text("dict")["blocks"]
+        
+        for b in blocks:
+            if "lines" not in b: continue
+            
+            for l in b["lines"]:
+                # Reconstruction de la ligne (qui peut avoir plusieurs styles)
+                line_text = "".join([s["text"] for s in l["spans"]]).strip()
+                if not line_text: continue
+                
+                # On prend le style du premier span significatif pour classifier la ligne
+                first_span = l["spans"][0]
+                size = round(first_span["size"], 1)
+                flags = first_span["flags"]
+                is_bold = bool(flags & 16) # 16 = Bold
+                is_upper = line_text.isupper()
+                
+                # --- HEURISTIQUES DE DÉTECTION ---
+                tag = "p"
+                
+                # On évite de prendre pour titre des lignes non pertinentes
+                # - Trop courtes (ex: numéros de page)
+                # - Purement numériques
+                # - Terminant par une ponctuation de fin de phrase
+                # - Commençant par un mot de type "Page", "Figure", etc.
+                
+                is_likely_not_header = (
+                    len(line_text) < 5 or 
+                    line_text.isdigit() or 
+                    line_text.strip().endswith(('.', ':', '!', '?')) or
+                    line_text.lower().startswith(('page ', 'figure ', 'table ', 'note :'))
+                )
+
+                # TITRE NIVEAU 1 (Très grand ou Grand + Gras + Majuscules)
+                if not is_likely_not_header:
+                    if size > body_font_size + 4:
+                        tag = "h1"
+                    elif size > body_font_size + 2 and is_bold:
+                        tag = "h1"
+                    
+                    # TITRE NIVEAU 2 (Plus grand que le corps ou Gras + Couleur/Style)
+                    elif size > body_font_size + 1:
+                        tag = "h2"
+                    elif is_bold and (is_upper or size > body_font_size):
+                        tag = "h2"
+                
+                # Listes et autres peuvent être détectées ici
+                
+                # Ajout au HTML avec métadonnée de page pour le frontend
+                html_parts += f'<{tag} data-page="{page_num}">{line_text}</{tag}>\n'
+
+    return parse_html_to_json_structure(f"<html><body>{html_parts}</body></html>")
+def extract_structure_from_txt(file_path):
+    """ TXT -> JSON Structure (Simple) """
+    with open(file_path, 'r', encoding='utf-8') as f:
+        text = f.read()
+    
+    html_parts = ""
+    # Heuristique simple pour le TXT
+    blocks = re.split(r'\n\s*\n', text)
+    
+    for i, block in enumerate(blocks):
         block = block.strip()
-        if not block or '--- PAGE' in block:
+        if not block: continue
+        
+        # Premier bloc = Titre probable
+        if i == 0 and len(block) < 200:
+            html_parts += f"<h1>{block}</h1>\n"
             continue
+            
+        lines = block.split('\n')
+        is_title = len(lines) == 1 and len(block) < 100
         
-        is_single_line = len(block.split('\n')) == 1
-        is_short = len(block) < 150
-        
-        # Détection des titres
-        if is_single_line and is_short:
-            if block.isupper():
-                html_parts += f"<h1>{block}</h1>\n"
-            elif re.match(r'^[IVX0-9]+\.', block) or block.endswith(':'):
-                html_parts += f"<h2>{block}</h2>\n"
-            else:
-                html_parts += f"<p>{block}</p>\n"
+        if is_title and block.isupper():
+            html_parts += f"<h2>{block}</h2>\n"
         else:
             html_parts += f"<p>{block}</p>\n"
-    
+            
     return parse_html_to_json_structure(f"<html><body>{html_parts}</body></html>")
 
 
@@ -591,13 +480,17 @@ def parse_html_to_json_structure(html_content):
         if not text:
             continue
         
+        # Extraction des métadonnées (Page, etc.)
+        page_num = element.attrs.get('data-page')
+        
         # Construction du nœud JSON
         node = {
             "type": tag,
             "level": get_semantic_level(tag),
             "content": text,
             "html": str(element),  # Conservé pour rétro-compatibilité
-            "children": []
+            "children": [],
+            "metadata": { "page": page_num } if page_num else {}
         }
         
         # Gestion de la hiérarchie
@@ -626,7 +519,8 @@ def parse_html_to_json_structure(html_content):
                     "type": "granule",
                     "level": 4,
                     "content": clean_line,
-                    "html": f"<p>{clean_line}</p>"
+                    "html": f"<p>{clean_line}</p>",
+                    "metadata": { "page": page_num } if page_num else {}
                 }
                 
                 # Attachement au bon parent
@@ -760,10 +654,15 @@ def process_json_node(node, fichier_source, granules_col,
             "fichier_source_id": str(fichier_source.id),
             "metadata": {
                 "level": node.get("level", 4),
-                "extraction_date": datetime.now().isoformat()
+                "extraction_date": datetime.now().isoformat(),
+                "page": node.get("metadata", {}).get("page")
             }
         }
         res = granules_col.insert_one(granule_mongo)
+        
+        # Récupération du numéro de page (si présent)
+        page_num_str = node.get("metadata", {}).get("page")
+        page_num = int(page_num_str) if page_num_str and str(page_num_str).isdigit() else None
         
         # Stockage MySQL (métadonnées)
         Granule.objects.create(
@@ -772,7 +671,8 @@ def process_json_node(node, fichier_source, granules_col,
             titre=content[:45] + "..." if len(content) > 45 else content,
             type_contenu="TEXTE",
             mongo_contenu_id=str(res.inserted_id),
-            ordre=counters['granule']
+            ordre=counters['granule'],
+            source_pdf_page=page_num
         )
         counters['granule'] += 1
 
@@ -795,11 +695,26 @@ def process_and_store_document(fichier_source_instance):
             json_structure = extract_structure_from_docx(path)
         elif ext == 'pdf':
             json_structure = extract_structure_from_pdf(path)
+        elif ext == 'txt':
+            json_structure = extract_structure_from_txt(path)
         else:
             raise ValueError(f"Format {ext} non supporté")
         
+        # FALLBACK: Si aucune section n'est trouvée (doc plat), on crée une structure par défaut
         if not json_structure.get("sections"):
-            raise ValueError("Aucune section extraite du document")
+            print("⚠️ Aucune section détectée, création d'une structure par défaut.")
+            json_structure["sections"] = [{
+                "type": "h1",
+                "level": 1,
+                "content": "Document Complet",
+                "children": [{
+                    "type": "granule",
+                    "level": 4, 
+                    "content": "Contenu du document (structure non détectée)",
+                    "html": "<p>Le contenu du document n'a pas pu être structuré automatiquement.</p>"
+                }]
+            }]
+            # Tente de récupérer tout texte brut disponible si possible (TODO: Améliorer l'extraction texte brut)
         
         # 2. STOCKAGE MONGODB - DOCUMENT COMPLET
         print(f"💾 Stockage MongoDB fichiers_uploades...")

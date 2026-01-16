@@ -42,8 +42,6 @@ INSTALLED_APPS = [
     'rest_framework',
     'drf_yasg',
     'corsheaders',
-    'rest_framework_simplejwt',             
-    'rest_framework_simplejwt.token_blacklist',  
     
     # Local apps
     'xcsm',
@@ -64,34 +62,15 @@ MIDDLEWARE = [
 
 # Configuration CORS (POUR LE DÉVELOPPEMENT)
 CORS_ALLOW_ALL_ORIGINS = True # Permet à n'importe quel frontend (localhost) de se connecter
-CORS_ALLOW_METHODS = [
-    'DELETE',
-    'GET',
-    'OPTIONS',
-    'PATCH',
-    'POST',
-    'PUT',
-]
-
-from corsheaders.defaults import default_headers
-CORS_ALLOW_HEADERS = list(default_headers) + [
-    'content-disposition',
-]
-
-# Augmenter la taille maximale du corps de la requête (pour gros HTML/JSON)
-DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50 MB
-FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50 MB
 
 
 # Configuration par défaut de l'API (DRF)
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-    ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticatedOrReadOnly',
-    ],
+        'rest_framework.permissions.AllowAny',  # Permet l'accès sans authentification (DEV ONLY)
+    ]
 }
+
 
 ROOT_URLCONF = 'xcsm_project.urls'
 
@@ -182,19 +161,3 @@ import os
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-
-
-from datetime import timedelta
-
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
-    'UPDATE_LAST_LOGIN': True,
-    'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY,
-    'AUTH_HEADER_TYPES': ('Bearer',),
-    'USER_ID_FIELD': 'id',
-    'USER_ID_CLAIM': 'user_id',
-}

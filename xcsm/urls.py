@@ -1,108 +1,82 @@
-# # xcsm/urls.py
-# from django.urls import path
-# from .views import DocumentUploadView
+"""
+Configuration complète des endpoints XCSM - VERSION CORRIGÉE
+"""
 
-# urlpatterns = [
-#     path('documents/upload/', DocumentUploadView.as_view(), name='document-upload'),
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 
-# ]
-
-
-
-
-# # xcsm/urls.py
-# from django.urls import path
-# from .views import DocumentUploadView
-
-# urlpatterns = [
-#     path('documents/upload/', DocumentUploadView.as_view(), name='document-upload'),
-# ]
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# xcsm/urls.py - Configuration complète des endpoints
-from django.urls import path
+# Import des vues existantes
 from .views import (
     DocumentUploadView,
+    DocumentUpdateStructureView,
+    DocumentListView,
+    DocumentDeleteView,
     FichierJsonStructureView,
     GranuleDetailView,
-    CoursJsonExportView,
     GranuleSearchView,
-    MongoStatisticsView
+    MongoStatisticsView,
 )
 
+# Import des vues d'authentification
+from .views_auth import (
+    register_view,
+    login_view,
+    logout_view,
+    me_view,
+    update_profile_view,
+    change_password_view,
+    mes_cours_view  # Vue séparée pour mes-cours
+)
+
+# Import du ViewSet Cours
+from .views_cours import CoursViewSet, ExerciceViewSet
+
+# Configuration du router pour les ViewSets
+router = DefaultRouter()
+router.register(r'cours', CoursViewSet, basename='cours')
+router.register(r'exercices', ExerciceViewSet, basename='exercices')
+
+# Configuration des URLs
 urlpatterns = [
     # =========================================================================
-    # 1. GESTION DES DOCUMENTS
+    # AUTHENTIFICATION
     # =========================================================================
-    
-    # Upload d'un nouveau document (PDF/DOCX)
-    path(
-        'documents/upload/', 
-        DocumentUploadView.as_view(), 
-        name='document-upload'
-    ),
-    
-    # Consultation de la structure JSON d'un fichier
-    path(
-        'documents/<uuid:fichier_id>/json/', 
-        FichierJsonStructureView.as_view(), 
-        name='fichier-json-structure'
-    ),
+    path('auth/register/', register_view, name='register'),
+    path('auth/login/', login_view, name='login'),
+    path('auth/logout/', logout_view, name='logout'),
+    path('auth/me/', me_view, name='me'),
+    path('auth/profile/', update_profile_view, name='update-profile'),
+    path('auth/change-password/', change_password_view, name='change-password'),
     
     # =========================================================================
-    # 2. CONSULTATION DES GRANULES
+    # MES COURS (VUE SÉPARÉE)
     # =========================================================================
-    
-    # Détail d'un granule spécifique
-    path(
-        'granules/<uuid:granule_id>/', 
-        GranuleDetailView.as_view(), 
-        name='granule-detail'
-    ),
-    
-    # Recherche dans les granules
-    path(
-        'granules/search/', 
-        GranuleSearchView.as_view(), 
-        name='granule-search'
-    ),
+    path('cours/mes-cours/', mes_cours_view, name='mes-cours'),
     
     # =========================================================================
-    # 3. EXPORT ET CONSULTATION DES COURS
+    # GESTION DES DOCUMENTS
     # =========================================================================
-    
-    # Export complet d'un cours en JSON
-    path(
-        'cours/<uuid:cours_id>/export-json/', 
-        CoursJsonExportView.as_view(), 
-        name='cours-json-export'
-    ),
+    path('documents/upload/', DocumentUploadView.as_view(), name='document-upload'),
+    path('documents/', DocumentListView.as_view(), name='document-list'),
+    path('documents/<uuid:pk>/', DocumentDeleteView.as_view(), name='document-delete'),
+    path('documents/<uuid:pk>/structure/', DocumentUpdateStructureView.as_view(), name='document-structure-update'),
+    path('documents/<uuid:fichier_id>/json/', FichierJsonStructureView.as_view(), 
+         name='fichier-json-structure'),
     
     # =========================================================================
-    # 4. STATISTIQUES ET MONITORING
+    # CONSULTATION DES GRANULES
     # =========================================================================
+    path('granules/search/', GranuleSearchView.as_view(), name='granule-search'),
+    path('granules/<uuid:granule_id>/', GranuleDetailView.as_view(), 
+         name='granule-detail'),
     
-    # Statistiques MongoDB (admin uniquement)
-    path(
-        'statistics/mongodb/', 
-        MongoStatisticsView.as_view(), 
-        name='mongo-statistics'
-    ),
+    # =========================================================================
+    # STATISTIQUES
+    # =========================================================================
+    path('statistics/mongodb/', MongoStatisticsView.as_view(), name='mongo-statistics'),
+    
+    # =========================================================================
+    # ROUTER (COURS VIEWSET) - TOUTES LES AUTRES ACTIONS COURS
+    # =========================================================================
+    path('', include(router.urls)),
 ]

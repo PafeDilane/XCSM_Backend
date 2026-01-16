@@ -131,6 +131,99 @@ class Cours(models.Model):
     def __str__(self):
         return self.titre
 
+# ==============================================================================
+# 5. ORGANISATION ET RECHERCHE
+# ==============================================================================
+
+class Categorie(models.Model):
+    """
+    Catégorie pour organiser les contenus (ex: Mathématiques, Algèbre, etc.)
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    titre = models.CharField(max_length=100)
+    slug = models.SlugField(unique=True)
+
+    def __str__(self):
+        return self.titre
+
+class Tag(models.Model):
+    """
+    Étiquettes pour le filtrage transversal
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    titre = models.CharField(max_length=50, unique=True)
+    
+    def __str__(self):
+        return self.titre
+
+
+# ==============================================================================
+# 6. EXERCICES ET ÉVALUATIONS
+# ==============================================================================
+
+class Exercice(models.Model):
+    """
+    Un exercice peut être lié à un granule ou autonome dans un cours.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    titre = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    
+    # Lien optionnel vers un granule (contexte de l'exercice)
+    granule = models.ForeignKey('Granule', on_delete=models.SET_NULL, null=True, blank=True, related_name="exercices")
+    
+    # Lien vers le cours (si exercice global)
+    cours = models.ForeignKey('Cours', on_delete=models.CASCADE, related_name="exercices_globaux")
+    
+    date_creation = models.DateTimeField(auto_now_add=True)
+    difficulte = models.IntegerField(choices=[(1, 'Facile'), (2, 'Moyen'), (3, 'Difficile')], default=1)
+
+    def __str__(self):
+        return self.titre
+
+class Question(models.Model):
+    """
+    Question individuelle d'un exercice.
+    """
+    TYPE_CHOICES = (
+        ('QCM', 'QCM'),
+        ('VRAI_FAUX', 'Vrai/Faux'),
+        ('TROUS', 'Texte à trous'),
+        ('ASSOCIATION', 'Association'),
+        ('ORDRE', 'Mise en ordre'),
+        ('OUVERTE', 'Question Ouverte'),
+    )
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    exercice = models.ForeignKey(Exercice, on_delete=models.CASCADE, related_name="questions")
+    enonce = models.TextField()
+    type_question = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    point = models.FloatField(default=1.0)
+    ordre = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['ordre']
+
+    def __str__(self):
+        return f"{self.type_question} - {self.enonce[:50]}..."
+
+class Reponse(models.Model):
+    """
+    Réponse possible ou attendue pour une question.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="reponses")
+    texte = models.TextField()
+    est_correcte = models.BooleanField(default=False)
+    feedback = models.TextField(blank=True, help_text="Explication affichée après réponse")
+    
+    # Pour les questions d'association (A -> B)
+    correspondance = models.CharField(max_length=255, blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.texte} ({'Vrai' if self.est_correcte else 'Faux'})"
+
+
 class Partie(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="parties")
@@ -184,9 +277,26 @@ class Granule(models.Model):
     mongo_contenu_id = models.CharField(max_length=100, help_text="ID du fragment dans MongoDB")
     
     ordre = models.PositiveIntegerField(default=0)
+    
+    # NOUVEAU: Tags pour le filtrage
+    tags = models.ManyToManyField('Tag', blank=True, related_name='granules')
+    
+    # Page source du PDF
+    source_pdf_page = models.PositiveIntegerField(null=True, blank=True, help_text="Numéro de page dans le PDF original")
 
     class Meta:
         ordering = ['ordre']
 
     def __str__(self):
         return self.titre
+class Organisation(models.Model):
+    """
+    Modèle pour gérer les organisations (écoles, universités, etc.)
+    """
+    nom = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    logo = models.ImageField(upload_to='logos_organisations/', null=True, blank=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.nom
