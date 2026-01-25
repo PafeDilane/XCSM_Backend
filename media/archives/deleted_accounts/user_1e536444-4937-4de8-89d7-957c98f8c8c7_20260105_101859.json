@@ -1,0 +1,12 @@
+{
+  "user_id": "1e536444-4937-4de8-89d7-957c98f8c8c7",
+  "username": "test.delete.account",
+  "email": "test.delete@xcsm.local",
+  "type_compte": "ENSEIGNANT",
+  "date_creation": "2026-01-05T10:18:57.993528+00:00",
+  "deletion_date": "2026-01-05T10:18:59.462545+00:00",
+  "statistics": {
+    "documents_count": 0,
+    "courses_count": 0
+  }
+}

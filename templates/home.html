@@ -1,0 +1,143 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>XCSM Backend</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        /* Reset léger */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f4f8;
+            color: #2c3e50;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            background: linear-gradient(135deg, #4CAF50, #2E7D32);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+        }
+
+        header img {
+            height: 100px;
+            transition: transform 0.5s;
+        }
+
+        header img:hover {
+            transform: rotate(15deg) scale(1.1);
+        }
+
+        header h1 {
+            margin-top: 15px;
+            font-size: 2.2em;
+            font-weight: 700;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+        }
+
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 50px 20px;
+        }
+
+        .card-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 25px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            width: 220px;
+            text-align: center;
+            padding: 25px 15px;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+        }
+
+        .card a {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            background: #4CAF50;
+            color: white;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+
+        .card a:hover {
+            background: #2E7D32;
+        }
+
+        footer {
+            text-align: center;
+            padding: 20px;
+            background: #e0e7ef;
+            color: #555;
+        }
+
+        @media (max-width: 600px) {
+            .card-container { flex-direction: column; gap: 15px; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <img src="{% static 'images/logo-XCSM.png' %}" alt="Logo XCSM">
+    <h1>Bienvenue sur XCSM Backend</h1>
+</header>
+
+<main>
+    <div class="card-container">
+        <div class="card">
+            <h2>API v1</h2>
+            <p>Accédez à tous les endpoints REST de votre application</p>
+            <a href="/api/v1/">Ouvrir</a>
+        </div>
+
+        <div class="card">
+            <h2>Swagger</h2>
+            <p>Documentation interactive de l'API</p>
+            <a href="/swagger/">Ouvrir</a>
+        </div>
+
+        <div class="card">
+            <h2>ReDoc</h2>
+            <p>Documentation API lisible et détaillée</p>
+            <a href="/redoc/">Ouvrir</a>
+        </div>
+
+        <div class="card">
+            <h2>Admin</h2>
+            <p>Interface Django pour la gestion complète</p>
+            <a href="/admin/">Ouvrir</a>
+        </div>
+    </div>
+</main>
+
+<footer>
+    &copy; 2025 XCSM. Tous droits réservés.
+</footer>
+
+</body>
+</html>

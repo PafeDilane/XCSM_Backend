@@ -1,0 +1,54 @@
+{
+  "project": "XCSM",
+  "date": "2026-01-04",
+  "base_url": "http://localhost:8000/api/v1",
+  "results": [
+    {
+      "test": "Connexion au serveur",
+      "success": false,
+      "details": "Code HTTP: 401",
+      "timestamp": "2026-01-04 16:21:48"
+    },
+    {
+      "test": "Inscription utilisateur",
+      "success": false,
+      "details": "Erreur 400: {'confirm_password': ['This field is required.']}",
+      "timestamp": "2026-01-04 16:21:48"
+    },
+    {
+      "test": "Connexion utilisateur",
+      "success": false,
+      "details": "Code HTTP: 400",
+      "timestamp": "2026-01-04 16:21:49"
+    },
+    {
+      "test": "Rafraîchissement token",
+      "success": false,
+      "details": "Refresh token non disponible",
+      "timestamp": "2026-01-04 16:21:50"
+    },
+    {
+      "test": "Accès endpoint protégé",
+      "success": false,
+      "details": "Access token non disponible",
+      "timestamp": "2026-01-04 16:21:50"
+    },
+    {
+      "test": "Upload avec authentification",
+      "success": false,
+      "details": "Access token non disponible",
+      "timestamp": "2026-01-04 16:21:51"
+    },
+    {
+      "test": "Déconnexion",
+      "success": false,
+      "details": "Tokens non disponibles",
+      "timestamp": "2026-01-04 16:21:51"
+    }
+  ],
+  "summary": {
+    "total": 7,
+    "passed": 0,
+    "failed": 7
+  }
+}
