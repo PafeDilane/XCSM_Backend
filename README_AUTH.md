@@ -258,11 +258,7 @@ git checkout -b feature/auth-jwt-implementation
 
 # Ajouter les modifications
 git add .
-git commit -m "feat: implémentation complète du système d'authentification JWT
-- Ajout des endpoints d'inscription, connexion et rafraîchissement
-- Implémentation de la sécurité avec tokens JWT
-- Tests complets d'authentification
-- Documentation technique détaillée"
+git commit -m "feat: ... "
 
 # Pousser la branche vers le dépôt distant
 git push origin feature/auth-jwt-implementation

@@ -1,0 +1,81 @@
+{% extends "notifications/email_templates/base.html" %}
+
+{% block title %}Votre document a été traité - XCSM{% endblock %}
+
+{% block content %}
+<h2>Bonjour {{ utilisateur.first_name }},</h2>
+
+<p>Votre document <strong>{{ fichier_source.titre }}</strong> a été traité avec succès sur la plateforme XCSM.</p>
+
+<div class="notification-card">
+    <h3 class="notification-title">Document traité</h3>
+
+    <div class="notification-message">
+        <p>Le document "{{ fichier_source.titre }}" a été transformé en granules d'apprentissage.</p>
+
+        {% if metadata.details %}
+        <p><strong>Détails du traitement :</strong></p>
+        <ul>
+            {% if metadata.details.total_pages %}
+            <li>Nombre de pages : {{ metadata.details.total_pages }}</li>
+            {% endif %}
+
+            {% if metadata.details.total_granules %}
+            <li>Granules générés : {{ metadata.details.total_granules }}</li>
+            {% endif %}
+
+            {% if metadata.details.processing_time %}
+            <li>Temps de traitement : {{ metadata.details.processing_time }}</li>
+            {% endif %}
+        </ul>
+        {% endif %}
+    </div>
+
+    <div class="notification-meta">
+        Date de traitement : {{ date_creation|date:"d/m/Y à H:i" }}
+        {% if metadata.document_id %}
+        | ID document : {{ metadata.document_id|truncatechars:12 }}
+        {% endif %}
+    </div>
+</div>
+
+<h3>Actions disponibles :</h3>
+
+<p>
+    <a href="https://xcsm.edu/documents/{{ fichier_source.id }}/view" class="button">
+        Voir le document
+    </a>
+
+    <a href="https://xcsm.edu/documents/{{ fichier_source.id }}/granules" class="button">
+        Explorer les granules
+    </a>
+
+    {% if metadata.cours_id %}
+    <a href="https://xcsm.edu/cours/{{ metadata.cours_id }}" class="button">
+        Accéder au cours
+    </a>
+    {% endif %}
+</p>
+
+<h3>Prochaines étapes :</h3>
+<ul>
+    <li>Les granules sont maintenant disponibles pour vos étudiants</li>
+    <li>Vous pouvez organiser les granules dans la structure de cours</li>
+    <li>Les étudiants peuvent accéder au contenu découpé</li>
+</ul>
+
+<p>Si vous avez des questions concernant le traitement de votre document, n'hésitez pas à consulter notre centre d'aide ou à contacter notre équipe de support.</p>
+
+<p>Cordialement,<br>
+    L'équipe XCSM</p>
+{% endblock %}
+
+{% block footer %}
+{{ block.super }}
+<p>
+    <small>
+        Ce document a été traité automatiquement par le système XCSM.
+        Pour toute question technique, contactez : support@xcsm.edu
+    </small>
+</p>
+{% endblock %}
