@@ -123,6 +123,41 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return data
 
 
+from .models import Utilisateur, Enseignant, Etudiant, Administrateur, Cours, ActionLog, Evaluation, Correction
+
+class ActionLogSerializer(serializers.ModelSerializer):
+    # ... (existing content)
+    utilisateur_username = serializers.CharField(source='utilisateur.username', read_only=True)
+    action_type_display = serializers.CharField(source='get_action_type_display', read_only=True)
+
+    class Meta:
+        model = ActionLog
+        fields = ('id', 'utilisateur_username', 'action_type', 'action_type_display', 'description', 'timestamp', 'metadata')
+        read_only_fields = ('id', 'timestamp')
+
+
+class EvaluationSerializer(serializers.ModelSerializer):
+    # ...
+    class Meta:
+        model = Evaluation
+        fields = '__all__'
+        read_only_fields = ('id', 'date_creation')
+
+class CoursSerializer(serializers.ModelSerializer):
+    """ Serializer pour les cours (Squelette pédagogique) """
+    class Meta:
+        model = Cours
+        fields = '__all__'
+        read_only_fields = ('id', 'date_creation')
+
+class CorrectionSerializer(serializers.ModelSerializer):
+    """ Serializer pour les corrections """
+    class Meta:
+        model = Correction
+        fields = '__all__'
+        read_only_fields = ('id', 'date_creation')
+
+
 class UserRegistrationSerializer(serializers.ModelSerializer):
     """
     Serializer pour l'inscription des utilisateurs
@@ -317,3 +352,49 @@ class AccountDeactivationSerializer(serializers.Serializer):
         max_length=500,
         help_text="Raison de la désactivation (optionnel)"
     )
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """
+    Serializer pour la demande de réinitialisation de mot de passe.
+    """
+    email = serializers.EmailField(required=True)
+
+    def validate_email(self, value):
+        if not Utilisateur.objects.filter(email=value).exists():
+            # Pour la sécurité, on pourrait ne pas lever d'erreur ici pour éviter l'énumération,
+            # mais le spec UC03 4a dit "Email introuvable".
+            raise serializers.ValidationError("Cet email ne correspond à aucun compte.")
+        return value
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """
+    Serializer pour la confirmation du nouveau mot de passe avec token.
+    """
+    uidb64 = serializers.CharField(required=True)
+    token = serializers.CharField(required=True)
+    new_password = serializers.CharField(
+        write_only=True,
+        required=True,
+        min_length=8,
+        style={'input_type': 'password'}
+    )
+    confirm_password = serializers.CharField(
+        write_only=True,
+        required=True,
+        style={'input_type': 'password'}
+    )
+
+    def validate(self, data):
+        if data['new_password'] != data['confirm_password']:
+            raise serializers.ValidationError({"new_password": "Les mots de passe ne correspondent pas."})
+        
+        # Validation complexité (UC01 Rules)
+        password = data['new_password']
+        if not any(char.isdigit() for char in password):
+            raise serializers.ValidationError({"new_password": "Le mot de passe doit contenir au moins un chiffre."})
+        if not any(char.isupper() for char in password):
+            raise serializers.ValidationError({"new_password": "Le mot de passe doit contenir au moins une majuscule."})
+            
+        return data

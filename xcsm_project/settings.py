@@ -1,44 +1,42 @@
 """
-Django settings for xcsm_project.
+Configuration Django pour le projet xcsm_project.
 
-Backend XCSM – configuration développement
-Django 5.2.x
-MySQL via XAMPP / MariaDB Syst + PhpMyAdmin indépendant en cas de conflits de versions (connexion TCP)
-
-Ce fichier combine les configurations des deux fichiers sources,
-avec une sécurité optimale pour l'environnement de développement.
+Ce fichier gère les paramètres globaux de l'application XCSM, incluant la base de données,
+la sécurité, l'authentification JWT et les tâches asynchrones Celery.
+Les variables sensibles sont chargées depuis un fichier .env via django-environ.
 """
 import sys
 from pathlib import Path
 import os
+from datetime import timedelta
+import environ
 
-# ================================================================
-# CONFIGURATION DE BASE ET CHEMINS
-# ================================================================
+# Initialisation de django-environ pour la gestion des variables d'environnement
+env = environ.Env(
+    DEBUG=(bool, False),
+    CORS_ALLOW_ALL_ORIGINS=(bool, False),
+    USE_MONGODB=(bool, True),
+    USE_REDIS=(bool, False),
+)
 
-# BASE_DIR : Définit le chemin absolu vers le répertoire parent du fichier settings.py
-# Cette variable est essentielle pour construire des chemins relatifs dans le projet
+# Dossier de base du projet (contient manage.py)
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Chargement explicite du fichier .env
+environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
 # ================================================================
-# SÉCURITÉ ET ENVIRONNEMENT DE DÉVELOPPEMENT
+# SÉCURITÉ ET ENVIRONNEMENT
 # ================================================================
 
-# SECRET_KEY : Clé cryptographique utilisée pour signer les sessions, tokens, etc.
-# IMPORTANT : Ne jamais exposer cette clé en production
-# À changer en production avec une clé sécurisée et unique
-SECRET_KEY = 'django-insecure-2bap)$_(%6z#=zfz373mh49ot743=60!kiy%xh)!^rd2q&a43w'
+# Clé secrète Django (doit être gardée secrète en production)
+SECRET_KEY = env('SECRET_KEY', default='django-insecure-default-key-change-it')
 
-# DEBUG : Active le mode débogage pour le développement
-# En développement : True
-# En production : toujours False
-DEBUG = True
+# Mode débogage (True en dev, False en production)
+DEBUG = env('DEBUG')
 
-# ALLOWED_HOSTS : Liste des domaines/noms d'hôte autorisés
-# En développement : liste vide ou ['localhost', '127.0.0.1']
-# En production : spécifier explicitement les domaines
-ALLOWED_HOSTS = []
+# Domaines autorisés à communiquer avec l'API
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
 
 
 # ================================================================
@@ -46,7 +44,7 @@ ALLOWED_HOSTS = []
 # ================================================================
 
 INSTALLED_APPS = [
-    # Applications natives de Django
+    # Cœur de Django
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -54,27 +52,26 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
-    # Application métier principale
+    # Application métier XCSM (Extraction et Gestion de Contenu)
     'xcsm',
 
-    # Applications tierces
-    'rest_framework',
-    'corsheaders',
-    'drf_yasg',
+    # Librairies tierces essentielles
+    'rest_framework',           # Framework pour l'API REST
+    'corsheaders',              # Gestion du Cross-Origin Resource Sharing
+    'drf_yasg',                 # Documentation automatique (Swagger/ReDoc)
+    'rest_framework_simplejwt', # Authentification par tokens JWT
+    'rest_framework_simplejwt.token_blacklist', # Gestion de la déconnexion (blacklist)
 ]
 
 
 # ================================================================
-# MIDDLEWARE
+# FILTRES INTERMÉDIAIRES (MIDDLEWARE)
 # ================================================================
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-
-    # Middleware CORS
-    'corsheaders.middleware.CorsMiddleware',
-
+    'corsheaders.middleware.CorsMiddleware', # Placé en haut pour gérer les requêtes cross-origin
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -84,23 +81,37 @@ MIDDLEWARE = [
 
 
 # ================================================================
-# CONFIGURATION CORS
+# CONFIGURATION CORS (Cross-Origin Resource Sharing)
 # ================================================================
 
-# Autorise toutes les origines en développement
-# En production, restreindre explicitement
-CORS_ALLOW_ALL_ORIGINS = True
+# En développement, on autorise tout. En production, configurer CORS_ALLOWED_ORIGINS dans le .env
+CORS_ALLOW_ALL_ORIGINS = env.bool('CORS_ALLOW_ALL_ORIGINS', default=True)
 
 
 # ================================================================
-# DJANGO REST FRAMEWORK
+# DJANGO REST FRAMEWORK (DRF)
 # ================================================================
 
 REST_FRAMEWORK = {
-    # Permissions par défaut pour toutes les vues API
+    # On force l'authentification par JWT pour toute l'API
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    # Par défaut, toutes les vues demandent d'être authentifié
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    # Limitation du nombre de requêtes (Anti-DDoS / Rate Limiting)
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.AnonRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'user': '1000/hour', # 1000 requêtes par heure pour un utilisateur connecté
+        'anon': '100/day',   # 100 requêtes par jour pour les anonymes
+    },
+    # Gestionnaire d'erreurs personnalisé pour l'examen
+    'EXCEPTION_HANDLER': 'xcsm.exceptions.custom_exception_handler',
 }
 
 
@@ -113,7 +124,7 @@ ROOT_URLCONF = 'xcsm_project.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / "templates"],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -125,87 +136,59 @@ TEMPLATES = [
     },
 ]
 
-# Point d’entrée WSGI
 WSGI_APPLICATION = 'xcsm_project.wsgi.application'
 
 
 # ================================================================
-# BASE DE DONNÉES (MySQL via XAMPP ou MariaDB System version recente (supérieure ou égale à 10.5 pour compatibilité avec la version actuelle de Django)+ PhpMyAdmin Independant installé pour gestionnaire GUI
+# BASES DE DONNÉES (MySQL/MariaDB)
 # ================================================================
 
 DATABASES = {
-    'default': {
-        # Moteur MySQL/MariaDB pour XAMPP
-        'ENGINE': 'django.db.backends.mysql',
-
-        # Nom de la base
-        'NAME': 'xcsm_db',
-
-        # Utilisateur MySQL dédié
-        'USER': 'xcsm_admin',
-
-        # Mot de passe MySQL
-        'PASSWORD': 'xcsm.4gi.enspy27',
-
-        # Connexion TCP requise pour XAMPP/
-        'HOST': '127.0.0.1',
-
-        # Port MySQL standard
-        'PORT': '3306',
-
-        # Options MySQL
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-        },
-    },
-    # Base de test dédiée
-    'test': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'test_xcsm_db',  # Base créée avec root
-        'USER': 'xcsm_admin',
-        'PASSWORD': 'xcsm.4gi.enspy27',
-        'HOST': '127.0.0.1',
-        'PORT': '3306',
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-        },
-    }
+    # Connexion principale via variable DATABASE_URL ou paramètres individuels
+    'default': env.db('DATABASE_URL', default=f"mysql://{env('DB_USER')}:{env('DB_PASSWORD')}@{env('DB_HOST')}:{env('DB_PORT')}/{env('DB_NAME')}"),
 }
 
-# Indiquer à Django d'utiliser la base test pour les tests
-if 'test' in sys.argv:
-    DATABASES['default'] = DATABASES['test']
+# Configuration du nom de la base de test
+DATABASES['default']['TEST'] = {
+    'NAME': env('TEST_DB_NAME', default='test_xcsm_db'),
+}
+
+# Choix dynamique du moteur de base de données pour les tests (MySQL ou SQLite)
+# Par défaut, SQLite est utilisé pour sa rapidité. Définir DB_ENGINE_TEST=mysql dans le .env pour tester sur MySQL.
+if 'test' in sys.argv or 'pytest' in sys.argv[0]:
+    if env('DB_ENGINE_TEST', default='sqlite') != 'mysql':
+        DATABASES['default'] = {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3.test',
+        }
+    # Si 'mysql' est choisi, on conserve la configuration DATABASES['default'] définie plus haut
 
 
 # ================================================================
-# VALIDATION DES MOTS DE PASSE
+# SÉCURITÉ ET COOKIES (Production vs Dev)
 # ================================================================
 
-AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
-]
+X_FRAME_OPTIONS = 'DENY' # Empêche d'inclure l'API dans un <iframe> (sécurité clickjacking)
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
+if not DEBUG:
+    # Paramètres de sécurité stricts pour la production
+    SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=True)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000 # Force HTTPS pendant 1 an
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_REFERRER_POLICY = "same-origin"
 
 
 # ================================================================
-# INTERNATIONALISATION
+# INTERNATIONALISATION ET LOCALISATION
 # ================================================================
 
-LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
-
+LANGUAGE_CODE = 'fr-fr' # Application en Français
+TIME_ZONE = 'Africa/Douala' # Fuseau horaire du Cameroun
 USE_I18N = True
 USE_TZ = True
 
@@ -214,79 +197,103 @@ USE_TZ = True
 # FICHIERS STATIQUES ET MÉDIAS
 # ================================================================
 
-# Templates
-TEMPLATES[0]['DIRS'] = [BASE_DIR / "templates"]
-
-# Static
+# Fichiers statiques (CSS, JS, Images du site)
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
-
+# Fichiers médias (Documents PDF/DOCX uploadés par les profs)
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-
-# ================================================================
-# CONFIGURATION DES MODÈLES
-# ================================================================
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Modèle utilisateur personnalisé
+# Modèle utilisateur personnalisé (étend les capacités de base de Django)
 AUTH_USER_MODEL = 'xcsm.Utilisateur'
 
+
 # ================================================================
-# CONFIGURATION JWT
+# CONFIGURATION JWT (Simple JWT)
 # ================================================================
-
-INSTALLED_APPS += [
-    'rest_framework_simplejwt',
-    'rest_framework_simplejwt.token_blacklist',  # Pour logout
-]
-
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-    ),
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
-    ],
-    'DEFAULT_THROTTLE_CLASSES': [
-        'rest_framework.throttling.UserRateThrottle',
-        'rest_framework.throttling.AnonRateThrottle',
-    ],
-    'DEFAULT_THROTTLE_RATES': {
-        'user': '1000/hour',
-        'anon': '100/day',
-    }
-}
-
-from datetime import timedelta
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(env('JWT_ACCESS_TOKEN_LIFETIME', default=60))),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=int(env('JWT_REFRESH_TOKEN_LIFETIME_DAYS', default=7))),
+    'ROTATE_REFRESH_TOKENS': True,      # Renouvelle le refresh token à chaque usage
+    'BLACKLIST_AFTER_ROTATION': True,   # Invalide les anciens tokens après rotation
     'UPDATE_LAST_LOGIN': True,
 
-    'ALGORITHM': 'HS256',
+    'ALGORITHM': env('JWT_ALGORITHM', default='HS256'),
     'SIGNING_KEY': SECRET_KEY,
-    'VERIFYING_KEY': None,
-
     'AUTH_HEADER_TYPES': ('Bearer',),
-    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
-    'USER_AUTHENTICATION_RULE': 'rest_framework_simplejwt.authentication.default_user_authentication_rule',
-
-    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
-    'TOKEN_TYPE_CLAIM': 'token_type',
-    'TOKEN_USER_CLASS': 'rest_framework_simplejwt.models.TokenUser',
-
-    'JTI_CLAIM': 'jti',
-
-    # Claims personnalisés
     'TOKEN_OBTAIN_SERIALIZER': 'xcsm.serializers.CustomTokenObtainPairSerializer',
 }
+
+# ================================================================
+# CONFIGURATION MONGODB (Stockage des Granules et Documents)
+# ================================================================
+MONGO_SETTINGS = {
+    'URI': env('MONGO_URI', default='mongodb://localhost:27017/'),
+    'DB_NAME': env('MONGO_DB_NAME', default='xcsm_granules_db'),
+}
+
+# ================================================================
+# CONFIGURATION CELERY / REDIS (Tâches asynchrones)
+# ================================================================
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
+CELERY_TIMEZONE = TIME_ZONE
+
+
+# ================================================================
+# CONFIGURATION LOGGING (Traçabilité)
+# ================================================================
+LOGS_DIR = os.path.join(BASE_DIR, 'logs')
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+        },
+        'file': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(LOGS_DIR, 'xcsm_debug.log'),
+            'formatter': 'verbose',
+        },
+        'error_file': {
+            'level': 'ERROR',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(LOGS_DIR, 'xcsm_errors.log'),
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django': {'handlers': ['console', 'error_file'], 'level': 'INFO', 'propagate': True},
+        'xcsm': {'handlers': ['console', 'file', 'error_file'], 'level': 'DEBUG', 'propagate': True},
+        'celery': {'handlers': ['console', 'file'], 'level': 'INFO', 'propagate': True},
+    },
+}
+
+# ================================================================
+# CONFIGURATION EMAIL (SMTP)
+# ================================================================
+EMAIL_BACKEND = env('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = env('EMAIL_HOST', default='localhost')
+EMAIL_PORT = env.int('EMAIL_PORT', default=1025)
+EMAIL_USE_TLS = env.bool('EMAIL_USE_TLS', default=False)
+EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='XCSM <noreply@xcsm.local>')
 

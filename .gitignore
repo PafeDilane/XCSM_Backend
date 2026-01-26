@@ -1,2 +1,81 @@
-env/
+# ============================================
+# XCSM .gitignore - Standard Pro
+# ============================================
+
+# --- Système & Environnement ---
 .env
+env/
+.venv/
+venv/
+ENV/
+*.swp
+*.bak
+.DS_Store
+Thumbs.db
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Django ---
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+media/archives/
+media/photos_profil/
+# On garde media/documents_bruts/ si vous voulez des exemples, 
+# mais il est plus propre d'ignorer tout media
+media/
+
+# --- Tests & Couverture ---
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# --- Docker ---
+.dockerignore
+# Note: Ne pas ignorer docker-compose.yml normalement, 
+# mais ignorer les volumes de données locaux si présents
+mongodb_data/
+mysql_data/
+
+# --- IDEs ---
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# --- Spécifique XCSM (Scripts de diagnostic/chaos générés) ---
+check_all_services.py
+inspect_data.py
+chaos_test.py
+run_real_demo.py
+generate_extended_test_data.py

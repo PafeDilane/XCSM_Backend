@@ -129,11 +129,86 @@ class Cours(models.Model):
     code = models.CharField(max_length=20, unique=True)
     description = models.TextField(blank=True)
     image = models.ImageField(upload_to='cours_images/', null=True, blank=True)
+    NIVEAU_CHOICES = (
+        ('L1', 'Licence 1'),
+        ('L2', 'Licence 2'),
+        ('L3', 'Licence 3'),
+        ('M1', 'Master 1'),
+        ('M2', 'Master 2'),
+    )
+    niveau = models.CharField(max_length=10, choices=NIVEAU_CHOICES, default='L1')
+    filiere = models.CharField(max_length=100, blank=True)
     est_publie = models.BooleanField(default=False)
     date_creation = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.titre
+
+# ==============================================================================
+# 5. BLOC ÉVALUATIONS ET CORRECTIONS (UC09b/c)
+# ==============================================================================
+
+class Evaluation(models.Model):
+    """
+    Modèle pour les évaluations (Examen, Quizz, etc.) liées à un cours.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    cours = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name="evaluations")
+    titre = models.CharField(max_length=200)
+    code = models.CharField(max_length=50, unique=True) # ex: EVAL-INF101-2025
+    description = models.TextField(blank=True)
+    duree = models.PositiveIntegerField(help_text="Durée en minutes", null=True, blank=True)
+    bareme = models.PositiveIntegerField(default=100)
+    est_publie = models.BooleanField(default=False)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_publication = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"EVAL: {self.titre} ({self.code})"
+
+class Correction(models.Model):
+    """
+    Modèle pour les corrections associées à une évaluation.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    evaluation = models.OneToOneField(Evaluation, on_delete=models.CASCADE, related_name="correction")
+    titre = models.CharField(max_length=200)
+    code = models.CharField(max_length=50, unique=True) # ex: CORR-EVAL-INF101-2025
+    bareme_detaille = models.TextField(help_text="Description textuelle ou JSON du barème")
+    est_publie = models.BooleanField(default=False)
+    date_creation = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"CORR: {self.evaluation.code}"
+
+# ==============================================================================
+# 6. BLOC HISTORIQUE ET AUDIT (UC08)
+# ==============================================================================
+
+class ActionLog(models.Model):
+    """
+    Journal des actions critiques effectuées par les utilisateurs (Enseignants/Admins).
+    """
+    ACTION_TYPES = (
+        ('LOGIN', 'Connexion'),
+        ('UPLOAD', 'Upload Document'),
+        ('MODIFY', 'Modification'),
+        ('DELETE', 'Suppression'),
+        ('PUBLISH', 'Publication'),
+    )
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    utilisateur = models.ForeignKey(Utilisateur, on_delete=models.CASCADE, related_name="actions")
+    action_type = models.CharField(max_length=20, choices=ACTION_TYPES)
+    description = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M')}] {self.utilisateur.username} - {self.action_type}"
 
 class Partie(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

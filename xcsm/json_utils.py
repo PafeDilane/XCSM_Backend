@@ -210,3 +210,30 @@ def get_statistics():
     except Exception as e:
         print(f"❌ Erreur get_statistics: {e}")
         return {}
+
+
+def update_granule_content(mongo_contenu_id, data):
+    """
+    Met à jour le contenu d'un granule dans MongoDB.
+    
+    Args:
+        mongo_contenu_id (str): ID MongoDB
+        data (dict): Nouvelles données
+        
+    Returns:
+        bool: True si succès
+    """
+    try:
+        mongo_db = get_mongo_db()
+        # On convertit en dict mutable pour éviter l'erreur "immutable QueryDict"
+        mutable_data = dict(data.items())
+        mutable_data.pop('_id', None)
+        
+        result = mongo_db['granules'].update_one(
+            {"_id": ObjectId(mongo_contenu_id)},
+            {"$set": mutable_data}
+        )
+        return result.modified_count > 0 or result.matched_count > 0
+    except Exception as e:
+        print(f"❌ Erreur update_granule_content: {e}")
+        return False

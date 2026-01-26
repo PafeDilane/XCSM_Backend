@@ -168,7 +168,7 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
             # Dates
             'date_creation', 'date_mise_a_jour',
         ]
-        read_only_fields = ['id', 'date_creation', 'date_mise_a_jour']
+        read_only_fields = ['id', 'utilisateur', 'date_creation', 'date_mise_a_jour']
 
 
 class PushSubscriptionSerializer(serializers.ModelSerializer):
@@ -198,7 +198,7 @@ class PushSubscriptionSerializer(serializers.ModelSerializer):
             'date_creation', 'date_desactivation',
         ]
         read_only_fields = [
-            'id', 'date_creation', 'date_desactivation', 'last_seen'
+            'id', 'utilisateur', 'date_creation', 'date_desactivation', 'last_seen'
         ]
 
     def validate_subscription_data(self, value):

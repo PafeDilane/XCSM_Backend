@@ -42,6 +42,12 @@ class NotificationServiceTest(TestCase):
         # Mock des services dépendants
         self.service.email_service = Mock()
         self.service.push_service = Mock()
+        from xcsm.models import Enseignant
+        Enseignant.objects.create(
+            utilisateur=self.user,
+            specialite='Informatique',
+            departement='Sciences'
+        )
 
     def test_create_notification_basic(self):
         """
@@ -231,6 +237,13 @@ class EmailNotificationServiceTest(TestCase):
             type_compte='ENSEIGNANT'
         )
 
+        from xcsm.models import Enseignant
+        Enseignant.objects.create(
+            utilisateur=self.user,
+            specialite='Informatique',
+            departement='Sciences'
+        )
+
         self.fichier_source = FichierSource.objects.create(
             titre='Test Document',
             enseignant=self.user.profil_enseignant,
@@ -344,6 +357,13 @@ class PushNotificationServiceTest(TestCase):
             email='test@xcsm.local',
             password='testpass123',
             type_compte='ENSEIGNANT'
+        )
+
+        from xcsm.models import Enseignant
+        Enseignant.objects.create(
+            utilisateur=self.user,
+            specialite='Informatique',
+            departement='Sciences'
         )
 
         self.notification = Notification.objects.create(
@@ -521,6 +541,13 @@ class IntegrationTest(TestCase):
             email='test@xcsm.local',
             password='testpass123',
             type_compte='ENSEIGNANT'
+        )
+
+        from xcsm.models import Enseignant
+        Enseignant.objects.create(
+            utilisateur=self.user,
+            specialite='Informatique',
+            departement='Sciences'
         )
 
         self.service = NotificationService()

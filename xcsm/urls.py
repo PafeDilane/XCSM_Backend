@@ -27,7 +27,9 @@ from .views_auth import (
     ChangePasswordView,
     VerifyTokenView,
     DeleteAccountView,
-    DeactivateAccountView
+    DeactivateAccountView,
+    PasswordResetRequestView,
+    PasswordResetConfirmView
 )
 
 # Import des vues principales (existant déjà)
@@ -37,7 +39,13 @@ from .views import (
     GranuleDetailView,
     CoursJsonExportView,
     GranuleSearchView,
-    MongoStatisticsView
+    MongoStatisticsView,
+    ActionLogViewSet,
+    FichierSourceViewSet,
+    CoursViewSet,
+    EvaluationViewSet,
+    CorrectionViewSet,
+    StudentPortalView
 )
 
 # Import des vues de notifications (si le module notifications existe)
@@ -70,6 +78,11 @@ if NOTIFICATIONS_AVAILABLE:
     router.register(r'push-subscriptions', PushSubscriptionViewSet, basename='pushsubscription')
     router.register(r'notification-templates', NotificationTemplateViewSet, basename='notificationtemplate')
     router.register(r'notification-digests', NotificationDigestViewSet, basename='notificationdigest')
+    router.register(r'history', ActionLogViewSet, basename='actionlog')
+    router.register(r'documents', FichierSourceViewSet, basename='fichiersource')
+    router.register(r'cours', CoursViewSet, basename='cours')
+    router.register(r'evaluations', EvaluationViewSet, basename='evaluation')
+    router.register(r'corrections', CorrectionViewSet, basename='correction')
 
 # Note: Vous pouvez ajouter d'autres ViewSets ici à l'avenir
 # Exemple: router.register(r'documents', DocumentViewSet, basename='document')
@@ -119,6 +132,10 @@ urlpatterns = [
         name='auth-deactivate-account'
     ),
 
+    # Récupération de mot de passe (UC03)
+    path('auth/password-reset/', PasswordResetRequestView.as_view(), name='auth-password-reset'),
+    path('auth/password-reset-confirm/', PasswordResetConfirmView.as_view(), name='auth-password-reset-confirm'),
+
     # =========================================================================
     # SECTION 1 : GESTION DES DOCUMENTS
     # =========================================================================
@@ -149,6 +166,9 @@ urlpatterns = [
     # GET /api/v1/cours/<uuid:cours_id>/export-json/ - Export JSON complet d'un cours
     path('cours/<uuid:cours_id>/export-json/', CoursJsonExportView.as_view(), name='cours-json-export'),
 
+    # Portail Étudiant (UC13)
+    path('portal/', StudentPortalView.as_view(), name='student-portal'),
+
     # =========================================================================
     # SECTION 4 : STATISTIQUES ET MONITORING
     # =========================================================================
@@ -156,16 +176,6 @@ urlpatterns = [
 
     # GET /api/v1/statistics/mongodb/ - Statistiques de la base MongoDB
     path('statistics/mongodb/', MongoStatisticsView.as_view(), name='mongo-statistics'),
-]
-
-# =============================================================================
-# INCLUSION DES URLS DES VIEWSETS (via router)
-# =============================================================================
-
-# Inclure les URLs générées par le router
-# Cela ajoute automatiquement les endpoints CRUD pour les ViewSets enregistrés
-urlpatterns += [
-    path('', include(router.urls)),
 ]
 
 # =============================================================================
@@ -180,6 +190,17 @@ if NOTIFICATIONS_AVAILABLE:
         # GET /api/v1/notifications/stats/ - Statistiques des notifications
         path('notifications/stats/', NotificationStatsView.as_view(), name='notification-stats'),
     ]
+
+# =============================================================================
+# INCLUSION DES URLS DES VIEWSETS (via router)
+# =============================================================================
+
+# Inclure les URLs générées par le router
+# Cela ajoute automatiquement les endpoints CRUD pour les ViewSets enregistrés
+# Note: Doit être après les paths spécifiques pour éviter les conflits
+urlpatterns += [
+    path('', include(router.urls)),
+]
 
 # =============================================================================
 # URLS DE DÉVELOPPEMENT ET DEBUG

@@ -207,11 +207,10 @@ class NotificationPreferenceModelTest(TestCase):
         """
         Test avec un canal désactivé globalement.
         """
-        preference = NotificationPreference.objects.create(
-            utilisateur=self.user,
-            document_traite_email=True,  # Activé spécifiquement
-            email_notifications_enabled=False  # Désactivé globalement
-        )
+        preference, created = NotificationPreference.objects.get_or_create(utilisateur=self.user)
+        preference.document_traite_email = True
+        preference.email_notifications_enabled = False
+        preference.save()
 
         # Même si la préférence spécifique est True, le canal global est désactivé
         self.assertFalse(preference.get_preference_for_type('DOCUMENT_TRAITE', 'email'))

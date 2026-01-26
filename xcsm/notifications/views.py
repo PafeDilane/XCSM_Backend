@@ -1,6 +1,7 @@
 """
 Vues API pour le système de notifications XCSM.
 """
+from django.db import models
 from rest_framework import viewsets, generics, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -147,7 +148,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
             'count': count
         }, status=status.HTTP_200_OK)
 
-    @action(detail=False, methods=['get'], url_path='recent')
+    @action(detail=False, methods=['get'], url_path='recent', url_name='recent')
     def recent_notifications(self, request):
         """
         Retourne les notifications récentes (7 derniers jours).
@@ -162,7 +163,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(notifications, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'], url_path='archive')
+    @action(detail=True, methods=['post'], url_path='archive', url_name='archive')
     def archive_notification(self, request, pk=None):
         """
         Archiver une notification spécifique.
@@ -228,7 +229,7 @@ class NotificationPreferenceViewSet(viewsets.ModelViewSet):
 
         return super().create(request, *args, **kwargs)
 
-    @action(detail=False, methods=['get'], url_path='mine')
+    @action(detail=False, methods=['get'], url_path='mine', url_name='mine')
     def my_preferences(self, request):
         """
         Retourne les préférences de l'utilisateur connecté.
@@ -265,7 +266,7 @@ class PushSubscriptionViewSet(viewsets.ModelViewSet):
         serializer.save(utilisateur=self.request.user)
 
     @action(detail=False, methods=['post'], url_path='unsubscribe')
-    def unsubscribe_device(self, request):
+    def unsubscribe(self, request):
         """
         Désinscrire un appareil spécifique.
         """
@@ -307,7 +308,7 @@ class NotificationTemplateViewSet(viewsets.ModelViewSet):
     filterset_fields = ['type_notification', 'is_active']
     search_fields = ['code', 'nom']
 
-    @action(detail=True, methods=['post'], url_path='test')
+    @action(detail=True, methods=['post'], url_path='test', url_name='test')
     def test_template(self, request, pk=None):
         """
         Tester un template avec des données de test.

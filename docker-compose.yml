@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # 1. Base de données Relationnelle (MySQL)
+  db:
+    image: mariadb:10.11
+    restart: always
+    environment:
+      MYSQL_DATABASE: xcsm_db
+      MYSQL_USER: xcsm_admin
+      MYSQL_PASSWORD: xcsm.4gi.enspy27
+      MYSQL_ROOT_PASSWORD: root_security_pass
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - xcsm_network
+
+  # 2. Base de données Sémantique (MongoDB)
+  mongodb:
+    image: mongo:6.0
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: xcsm_mongo_admin
+      MONGO_INITDB_ROOT_PASSWORD: xcsm.4gi.enspy27
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - xcsm_network
+
+  # 3. Message Broker (Redis)
+  redis:
+    image: redis:7.0-alpine
+    restart: always
+    networks:
+      - xcsm_network
+
+  # 4. API Backend (Django)
+  backend:
+    build: .
+    restart: always
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+      - media_volume:/app/media
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - mongodb
+      - redis
+    networks:
+      - xcsm_network
+
+  # 5. Worker Celery (Traitement Sémantique Asynchrone)
+  worker:
+    build: .
+    restart: always
+    command: celery -A xcsm_project worker --loglevel=info
+    volumes:
+      - .:/app
+      - media_volume:/app/media
+    env_file:
+      - .env
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - xcsm_network
+
+networks:
+  xcsm_network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  mongo_data:
+  media_volume:

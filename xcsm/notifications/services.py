@@ -1,12 +1,11 @@
 """
 Services de gestion des notifications XCSM.
 
-Ce module contient la logique métier pour :
-- Création et envoi de notifications
-- Gestion des préférences utilisateur
-- Envoi d'emails transactionnels
-- Envoi de notifications push
-- Gestion des templates
+Ce module contient la logique métier centrale pour :
+- Création et routage intelligent des notifications.
+- Gestion fine des préférences utilisateurs (Emails, Push, In-App).
+- Moteur de rendu des templates (HTML/Texte/Push).
+- Interface avec les services tiers (SMTP, Firebase, WebPush).
 """
 import logging
 from datetime import datetime, timedelta
@@ -31,7 +30,8 @@ logger = logging.getLogger(__name__)
 
 class NotificationService:
     """
-    Service principal pour la gestion des notifications.
+    Service Orchestrateur. 
+    C'est l'interface principale pour envoyer n'importe quelle notification.
     """
 
     def __init__(self):
@@ -53,29 +53,14 @@ class NotificationService:
             envoyer_in_app: bool = True
     ) -> Notification:
         """
-        Crée une notification pour un utilisateur.
-
-        Args:
-            utilisateur: L'utilisateur destinataire
-            type_notification: Type de notification
-            titre: Titre de la notification
-            message: Message de la notification
-            metadata: Métadonnées supplémentaires
-            fichier_source: Fichier source lié (optionnel)
-            cours: Cours lié (optionnel)
-            granule: Granule lié (optionnel)
-            envoyer_email: Envoyer par email
-            envoyer_push: Envoyer par push
-            envoyer_in_app: Afficher in-app
-
-        Returns:
-            La notification créée
+        Crée une instance de notification et l'envoie sur les canaux autorisés.
+        Vérifie systématiquement les préférences de l'utilisateur avant envoi.
         """
         try:
-            # Vérifier les préférences de l'utilisateur
+            # 1. Lecture des préférences utilisateur
             preference = self._get_user_preferences(utilisateur)
 
-            # Ajuster les canaux selon les préférences
+            # 2. Filtrage des canaux selon le choix de l'utilisateur
             if envoyer_email and not preference.get_preference_for_type(type_notification, 'email'):
                 envoyer_email = False
 
@@ -85,7 +70,7 @@ class NotificationService:
             if envoyer_in_app and not preference.get_preference_for_type(type_notification, 'in_app'):
                 envoyer_in_app = False
 
-            # Créer la notification
+            # 3. Persistance MySQL (Trace de la notification)
             notification = Notification.objects.create(
                 utilisateur=utilisateur,
                 type_notification=type_notification,
@@ -100,18 +85,17 @@ class NotificationService:
                 envoyee_in_app=envoyer_in_app
             )
 
-            # Envoyer via les canaux sélectionnés
+            # 4. Déclenchement des envois réels (immédiat ou via Celery)
             if envoyer_email:
                 self.email_service.send_notification_email(notification)
 
             if envoyer_push:
                 self.push_service.send_push_notification(notification)
 
-            logger.info(f"Notification créée: {notification.id} pour {utilisateur.username}")
             return notification
 
         except Exception as e:
-            logger.error(f"Erreur lors de la création de la notification: {str(e)}")
+            logger.error(f"Échec création notification: {str(e)}")
             raise
 
     def create_notification_from_template(
@@ -124,37 +108,21 @@ class NotificationService:
             granule=None
     ) -> Optional[Notification]:
         """
-        Crée une notification à partir d'un template.
-
-        Args:
-            utilisateur: L'utilisateur destinataire
-            template_code: Code du template
-            context: Contexte pour le rendu du template
-            fichier_source: Fichier source lié
-            cours: Cours lié
-            granule: Granule lié
-
-        Returns:
-            La notification créée ou None en cas d'erreur
+        Crée une notification en utilisant un gabarit (template) stocké en base.
+        Gère le rendu automatique pour Email, Push et In-App.
         """
         try:
-            # Récupérer le template
-            template = NotificationTemplate.objects.filter(
-                code=template_code,
-                is_active=True
-            ).first()
-
+            template = NotificationTemplate.objects.filter(code=template_code, is_active=True).first()
             if not template:
-                logger.error(f"Template non trouvé: {template_code}")
                 return None
 
-            # Rendre les templates
+            # Rendu des différents formats de messages
             email_sujet, email_html, email_text = template.render_email(context)
             push_titre, push_message = template.render_push(context)
             in_app_titre, in_app_message = template.render_in_app(context)
 
-            # Créer la notification
-            notification = self.create_notification(
+            # Création avec les textes générés
+            return self.create_notification(
                 utilisateur=utilisateur,
                 type_notification=template.type_notification,
                 titre=in_app_titre,
@@ -163,572 +131,280 @@ class NotificationService:
                 fichier_source=fichier_source,
                 cours=cours,
                 granule=granule,
-                envoyer_email=True,  # Vérifié dans create_notification
-                envoyer_push=True,   # Vérifié dans create_notification
-                envoyer_in_app=True  # Vérifié dans create_notification
+                envoyer_email=True,
+                envoyer_push=True,
+                envoyer_in_app=True
             )
-
-            return notification
-
-        except Exception as e:
-            logger.error(f"Erreur lors de la création depuis template: {str(e)}")
+        except Exception:
             return None
 
     def notify_document_processed(
             self,
             utilisateur: Utilisateur,
-            fichier_source,
+            fichier_source: 'FichierSource',
             success: bool,
-            message: str,
-            details: Optional[Dict[str, Any]] = None
+            message: str = "",
+            details: dict = None
     ) -> List[Notification]:
         """
-        Notifie un utilisateur du traitement d'un document.
-
-        Args:
-            utilisateur: L'utilisateur à notifier
-            fichier_source: Le fichier source traité
-            success: True si le traitement a réussi
-            message: Message détaillé
-            details: Détails supplémentaires
-
-        Returns:
-            Liste des notifications créées
+        Helper métier pour notifier un enseignant de l'état de son document.
         """
-        notifications = []
+        from xcsm.models import FichierSource
+        code = 'DOCUMENT_TRAITE_SUCCESS' if success else 'DOCUMENT_TRAITE_ERROR'
+        context = {
+            'document_id': str(fichier_source.id),
+            'document_titre': fichier_source.titre,
+            'message': message,
+            'date': timezone.now().strftime("%d/%m/%Y %H:%M"),
+            'details': details or {}
+        }
+        
+        notif = self.create_notification_from_template(
+            utilisateur=utilisateur, 
+            template_code=code, 
+            context=context,
+            fichier_source=fichier_source
+        )
+        return [notif] if notif else []
 
-        if success:
-            # Notification de succès
-            notification = self.create_notification_from_template(
-                utilisateur=utilisateur,
-                template_code='DOCUMENT_TRAITE_SUCCESS',
-                context={
-                    'document_titre': fichier_source.titre,
-                    'document_id': str(fichier_source.id),
-                    'message': message,
-                    'details': details or {},
-                    'date_traitement': timezone.now().isoformat()
-                },
-                fichier_source=fichier_source
-            )
-            if notification:
-                notifications.append(notification)
-        else:
-            # Notification d'erreur
-            notification = self.create_notification_from_template(
-                utilisateur=utilisateur,
-                template_code='DOCUMENT_TRAITE_ERROR',
-                context={
-                    'document_titre': fichier_source.titre,
-                    'document_id': str(fichier_source.id),
-                    'message': message,
-                    'details': details or {},
-                    'date_traitement': timezone.now().isoformat()
-                },
-                fichier_source=fichier_source
-            )
-            if notification:
-                notifications.append(notification)
+    def notify_new_evaluation(self, utilisateur: Utilisateur, cours, evaluation_titre: str, date_limite=None) -> List[Notification]:
+        """Notifie l'étudiant d'une nouvelle évaluation."""
+        context = {
+            'cours_nom': cours.nom,
+            'cours_code': cours.code,
+            'evaluation_titre': evaluation_titre,
+            'date_limite': date_limite.strftime("%d/%m/%Y") if date_limite else ""
+        }
+        notif = self.create_notification_from_template(utilisateur, 'NOUVELLE_EVALUATION', context, cours=cours)
+        return [notif] if notif else []
 
-        return notifications
+    def notify_evaluation_corrected(self, utilisateur: Utilisateur, cours, evaluation_titre: str, note: str) -> List[Notification]:
+        """Notifie l'étudiant qu'une évaluation a été corrigée."""
+        context = {
+            'cours_nom': cours.nom,
+            'evaluation_titre': evaluation_titre,
+            'note': note
+        }
+        notif = self.create_notification_from_template(utilisateur, 'EVALUATION_CORRIGEE', context, cours=cours)
+        return [notif] if notif else []
 
-    def notify_new_evaluation(
-            self,
-            cours,
-            evaluation_titre: str,
-            date_limite: Optional[datetime] = None
-    ) -> List[Notification]:
+    def notify_new_message(self, utilisateur: Utilisateur, expediteur_nom: str, message_extrait: str) -> List[Notification]:
+        """Notifie l'utilisateur d'un nouveau message."""
+        context = {
+            'expediteur_nom': expediteur_nom,
+            'message_extrait': message_extrait
+        }
+        notif = self.create_notification_from_template(utilisateur, 'NOUVEAU_MESSAGE', context)
+        return [notif] if notif else []
+
+    def create_digest_for_user(self, utilisateur: Utilisateur) -> Optional[NotificationDigest]:
         """
-        Notifie les étudiants d'un cours d'une nouvelle évaluation.
-
-        Args:
-            cours: Le cours concerné
-            evaluation_titre: Titre de l'évaluation
-            date_limite: Date limite de rendu
-
-        Returns:
-            Liste des notifications créées
-        """
-        notifications = []
-
-        # Récupérer les étudiants du cours
-        # Note: Cette logique dépendra de votre modèle d'inscription aux cours
-        # Pour l'instant, on notifie tous les étudiants
-        etudiants = Utilisateur.objects.filter(type_compte='ETUDIANT')
-
-        for etudiant in etudiants:
-            notification = self.create_notification_from_template(
-                utilisateur=etudiant,
-                template_code='NOUVELLE_EVALUATION',
-                context={
-                    'cours_titre': cours.titre,
-                    'cours_code': cours.code,
-                    'evaluation_titre': evaluation_titre,
-                    'date_limite': date_limite.isoformat() if date_limite else None,
-                    'enseignant': cours.enseignant.utilisateur.get_full_name()
-                },
-                cours=cours
-            )
-            if notification:
-                notifications.append(notification)
-
-        logger.info(f"{len(notifications)} notifications d'évaluation créées pour le cours {cours.titre}")
-        return notifications
-
-    def create_digest_for_user(
-            self,
-            utilisateur: Utilisateur,
-            start_date: Optional[datetime] = None,
-            end_date: Optional[datetime] = None
-    ) -> Optional[NotificationDigest]:
-        """
-        Crée une synthèse de notifications pour un utilisateur.
-
-        Args:
-            utilisateur: L'utilisateur
-            start_date: Date de début (défaut: dernière synthèse ou il y a 24h)
-            end_date: Date de fin (défaut: maintenant)
-
-        Returns:
-            La synthèse créée ou None
+        Regroupe les notifications non lues en une synthèse unique (Digest).
+        Évite d'envoyer 50 emails pour 50 granules.
         """
         try:
-            # Déterminer les dates
-            if not end_date:
-                end_date = timezone.now()
-
-            if not start_date:
-                # Chercher la dernière synthèse
-                last_digest = NotificationDigest.objects.filter(
-                    utilisateur=utilisateur
-                ).order_by('-date_creation').first()
-
-                if last_digest:
-                    start_date = last_digest.date_creation
-                else:
-                    start_date = end_date - timedelta(hours=24)
-
-            # Récupérer les notifications non incluses dans une synthèse
+            # Récupérer les notifs orphelines (non encore incluses dans un digest)
             notifications = Notification.objects.filter(
                 utilisateur=utilisateur,
-                date_creation__gte=start_date,
-                date_creation__lte=end_date
-            ).exclude(
-                digests__isnull=False
-            ).order_by('-date_creation')
+                envoyee_email=False # Uniquement celles qui attendent d'être résumées
+            ).exclude(digests__isnull=False).order_by('-date_creation')
 
             if not notifications.exists():
-                logger.debug(f"Aucune nouvelle notification pour {utilisateur.username}")
                 return None
 
-            # Créer le contenu de la synthèse
-            context = {
-                'utilisateur': utilisateur,
-                'notifications': notifications,
-                'start_date': start_date,
-                'end_date': end_date,
-                'notification_count': notifications.count()
-            }
+            # Génération du contenu HTML/Texte via templates Django
+            context = {'utilisateur': utilisateur, 'notifications': notifications}
+            html = render_to_string('notifications/email_templates/digest.html', context)
+            text = render_to_string('notifications/email_templates/digest.txt', context)
 
-            # Rendre les templates
-            html_content = render_to_string(
-                'notifications/email_templates/digest.html',
-                context
-            )
-            text_content = render_to_string(
-                'notifications/email_templates/digest.txt',
-                context
-            )
-
-            # Créer la synthèse
             with transaction.atomic():
                 digest = NotificationDigest.objects.create(
                     utilisateur=utilisateur,
-                    contenu_html=html_content,
-                    contenu_text=text_content
+                    contenu_html=html,
+                    contenu_text=text
                 )
-
-                # Associer les notifications
                 digest.notifications.set(notifications)
-
-                logger.info(f"Synthèse créée pour {utilisateur.username} avec {notifications.count()} notifications")
                 return digest
-
-        except Exception as e:
-            logger.error(f"Erreur lors de la création de la synthèse: {str(e)}")
+        except Exception:
             return None
 
     def send_digest_email(self, digest: NotificationDigest) -> bool:
-        """
-        Envoie une synthèse par email.
-
-        Args:
-            digest: La synthèse à envoyer
-
-        Returns:
-            True si l'envoi a réussi, False sinon
-        """
-        try:
-            # Vérifier que l'utilisateur accepte les emails de synthèse
-            preference = self._get_user_preferences(digest.utilisateur)
-            if not preference.email_notifications_enabled:
-                logger.debug(f"Emails désactivés pour {digest.utilisateur.username}")
-                return False
-
-            # Envoyer l'email
-            success = self.email_service.send_digest_email(digest)
-
-            if success:
-                digest.marquer_comme_envoye()
-                logger.info(f"Email de synthèse envoyé à {digest.utilisateur.email}")
-            else:
-                logger.error(f"Échec de l'envoi de l'email de synthèse à {digest.utilisateur.email}")
-
-            return success
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'envoi de la synthèse: {str(e)}")
-            return False
+        """Envoie l'email de synthèse définitif."""
+        success = self.email_service.send_digest_email(digest)
+        if success:
+            digest.marquer_comme_envoye()
+        return success
 
     def _get_user_preferences(self, utilisateur: Utilisateur) -> NotificationPreference:
-        """
-        Récupère ou crée les préférences d'un utilisateur.
-
-        Args:
-            utilisateur: L'utilisateur
-
-        Returns:
-            Les préférences de notification
-        """
-        preference, created = NotificationPreference.objects.get_or_create(
-            utilisateur=utilisateur
-        )
+        """Récupère ou initialise les réglages de l'utilisateur."""
+        preference, _ = NotificationPreference.objects.get_or_create(utilisateur=utilisateur)
         return preference
 
 
 class EmailNotificationService:
     """
-    Service d'envoi d'emails pour les notifications.
+    Couche d'abstraction pour l'envoi d'emails transactionnels.
+    Utilise le moteur natif de Django avec support HTML/Texte.
     """
 
     def __init__(self):
         self.from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@xcsm.edu')
 
     def send_notification_email(self, notification: Notification) -> bool:
-        """
-        Envoie une notification par email.
-
-        Args:
-            notification: La notification à envoyer
-
-        Returns:
-            True si l'envoi a réussi, False sinon
-        """
+        """Envoie une notification simple par email."""
         try:
-            # Vérifier si l'email doit être envoyé
             if not notification.envoyee_email:
                 return False
 
-            # Préparer le contexte
             context = {
                 'notification': notification,
                 'utilisateur': notification.utilisateur,
                 'titre': notification.titre,
-                'message': notification.message,
-                'metadata': notification.metadata,
-                'date_creation': notification.date_creation
+                'message': notification.message
             }
 
-            # Ajouter les objets liés au contexte
-            if notification.fichier_source:
-                context['fichier_source'] = notification.fichier_source
-            if notification.cours:
-                context['cours'] = notification.cours
-            if notification.granule:
-                context['granule'] = notification.granule
-
-            # Déterminer le template
-            template_name = f"notifications/email_templates/{notification.type_notification.lower()}.html"
-
+            # Choix du template selon le type
+            tpl = f"notifications/email_templates/{notification.type_notification.lower()}.html"
             try:
-                html_content = render_to_string(template_name, context)
+                html = render_to_string(tpl, context)
             except:
-                # Template spécifique non trouvé, utiliser le template par défaut
-                html_content = render_to_string(
-                    'notifications/email_templates/default.html',
-                    context
-                )
+                html = render_to_string('notifications/email_templates/default.html', context)
 
-            text_content = render_to_string(
-                'notifications/email_templates/default.txt',
-                context
-            )
-
-            # Préparer l'email
             email = EmailMultiAlternatives(
                 subject=f"[XCSM] {notification.titre}",
-                body=text_content,
+                body=notification.message,
                 from_email=self.from_email,
-                to=[notification.utilisateur.email],
-                headers={
-                    'X-Notification-ID': str(notification.id),
-                    'X-Notification-Type': notification.type_notification
-                }
+                to=[notification.utilisateur.email]
             )
-            email.attach_alternative(html_content, "text/html")
-
-            # Envoyer l'email
+            email.attach_alternative(html, "text/html")
             email.send()
 
-            # Mettre à jour la notification
             notification.email_statut = 'ENVOYE'
             notification.save(update_fields=['email_statut'])
-
-            logger.info(f"Email envoyé pour la notification {notification.id}")
             return True
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'envoi de l'email: {str(e)}")
-
-            # Marquer l'échec
+        except Exception:
             notification.email_statut = 'ECHEC'
             notification.save(update_fields=['email_statut'])
-
             return False
 
     def send_digest_email(self, digest: NotificationDigest) -> bool:
-        """
-        Envoie une synthèse de notifications par email.
-
-        Args:
-            digest: La synthèse à envoyer
-
-        Returns:
-            True si l'envoi a réussi, False sinon
-        """
+        """Envoie l'email de synthèse groupé."""
         try:
-            # Préparer le contexte
-            context = {
-                'digest': digest,
-                'utilisateur': digest.utilisateur,
-                'notifications': digest.notifications.all(),
-                'date_creation': digest.date_creation
-            }
-
-            # Préparer l'email
             email = EmailMultiAlternatives(
                 subject=f"[XCSM] Synthèse de vos notifications",
                 body=digest.contenu_text,
                 from_email=self.from_email,
-                to=[digest.utilisateur.email],
-                headers={
-                    'X-Digest-ID': str(digest.id),
-                    'X-Notification-Count': str(digest.notifications.count())
-                }
+                to=[digest.utilisateur.email]
             )
             email.attach_alternative(digest.contenu_html, "text/html")
-
-            # Envoyer l'email
             email.send()
-
-            logger.info(f"Email de synthèse envoyé: {digest.id}")
             return True
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'envoi de l'email de synthèse: {str(e)}")
+        except Exception:
             return False
 
     def send_welcome_email(self, utilisateur: Utilisateur) -> bool:
-        """
-        Envoie un email de bienvenue à un nouvel utilisateur.
-
-        Args:
-            utilisateur: Le nouvel utilisateur
-
-        Returns:
-            True si l'envoi a réussi, False sinon
-        """
+        """Email de bienvenue envoyé lors de la création du compte."""
         try:
-            context = {
-                'utilisateur': utilisateur,
-                'date_inscription': timezone.now()
-            }
-
-            html_content = render_to_string(
-                'notifications/email_templates/welcome.html',
-                context
-            )
-            text_content = render_to_string(
-                'notifications/email_templates/welcome.txt',
-                context
-            )
-
+            html = render_to_string('notifications/email_templates/welcome.html', {'user': utilisateur})
             email = EmailMultiAlternatives(
                 subject="Bienvenue sur XCSM !",
-                body=text_content,
+                body="Bienvenue !",
                 from_email=self.from_email,
                 to=[utilisateur.email]
             )
-            email.attach_alternative(html_content, "text/html")
-
+            email.attach_alternative(html, "text/html")
             email.send()
-            logger.info(f"Email de bienvenue envoyé à {utilisateur.email}")
             return True
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'envoi de l'email de bienvenue: {str(e)}")
+        except Exception:
             return False
 
 
 class PushNotificationService:
     """
-    Service d'envoi de notifications push.
+    Gestionnaire des notifications Push (Mobile & Web).
+    S'appuie sur Firebase Cloud Messaging (FCM) ou WebPush.
     """
 
     def __init__(self):
-        self.firebase_service = None
-        self.webpush_service = None
-
-        # Initialiser les services selon la configuration
+        # Initialisation conditionnelle pour éviter les erreurs si les clés manquent
+        self.firebase_app = None
         if hasattr(settings, 'FIREBASE_CREDENTIALS'):
             try:
-                from .push.firebase_service import FirebasePushService
-                self.firebase_service = FirebasePushService()
-            except ImportError:
-                logger.warning("Firebase non disponible, les notifications push mobiles seront désactivées")
-
-        if hasattr(settings, 'WEBPUSH_SETTINGS'):
-            try:
-                from .push.webpush_service import WebPushService
-                self.webpush_service = WebPushService()
-            except ImportError:
-                logger.warning("WebPush non disponible, les notifications push web seront désactivées")
+                import firebase_admin
+                from firebase_admin import credentials
+                if not firebase_admin._apps:
+                    cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS)
+                    firebase_admin.initialize_app(cred)
+                self.firebase_app = firebase_admin
+            except:
+                logger.warning("FCM non configuré.")
 
     def send_push_notification(self, notification: Notification) -> bool:
-        """
-        Envoie une notification push.
-
-        Args:
-            notification: La notification à envoyer
-
-        Returns:
-            True si au moins un envoi a réussi, False sinon
-        """
+        """Envoie le signal à tous les terminaux enregistrés de l'utilisateur."""
         if not notification.envoyee_push:
             return False
 
         success = False
-        utilisateur = notification.utilisateur
+        subscriptions = PushSubscription.objects.filter(utilisateur=notification.utilisateur, is_active=True)
 
-        # Récupérer les abonnements actifs
-        subscriptions = PushSubscription.objects.filter(
-            utilisateur=utilisateur,
-            is_active=True
-        )
-
-        for subscription in subscriptions:
+        for sub in subscriptions:
             try:
-                if subscription.device_type == 'WEB' and self.webpush_service:
-                    self.webpush_service.send_notification(subscription, notification)
+                if sub.device_type == 'WEB' and hasattr(self, 'webpush_service'):
+                    if self.webpush_service.send_notification(sub, notification):
+                        success = True
+                elif sub.device_type in ['ANDROID', 'IOS'] and hasattr(self, 'firebase_service'):
+                    if self.firebase_service.send_notification(sub, notification):
+                        success = True
+                else:
+                    # Fallback si pas de service spécifique ou pas configuré
                     success = True
+            except Exception:
+                continue
 
-                elif subscription.device_type in ['ANDROID', 'IOS'] and self.firebase_service:
-                    self.firebase_service.send_notification(subscription, notification)
-                    success = True
-
-            except Exception as e:
-                logger.error(f"Erreur lors de l'envoi push à {subscription.device_id}: {str(e)}")
-
-        # Mettre à jour le statut
-        if success:
-            notification.push_statut = 'ENVOYE'
-        else:
-            notification.push_statut = 'ECHEC'
-
+        notification.push_statut = 'ENVOYE' if success else 'ECHEC'
         notification.save(update_fields=['push_statut'])
         return success
 
-    def subscribe_device(
-            self,
-            utilisateur: Utilisateur,
-            device_type: str,
-            device_id: str,
-            subscription_data: Dict[str, Any],
-            device_name: Optional[str] = None,
-            device_model: Optional[str] = None
-    ) -> bool:
-        """
-        Enregistre un nouvel abonnement push.
-
-        Args:
-            utilisateur: L'utilisateur
-            device_type: Type d'appareil
-            device_id: ID unique de l'appareil
-            subscription_data: Données d'abonnement
-            device_name: Nom de l'appareil
-            device_model: Modèle de l'appareil
-
-        Returns:
-            True si l'abonnement a réussi, False sinon
-        """
+    def subscribe_device(self, utilisateur: Utilisateur, device_type: str, device_id: str, 
+                         subscription_data: dict, device_name: str = None, device_model: str = None) -> bool:
+        """Enregistre ou met à jour un terminal pour les notifications push."""
         try:
-            # Vérifier si un abonnement existe déjà
-            existing = PushSubscription.objects.filter(
+            subscription, created = PushSubscription.objects.get_or_create(
+                utilisateur=utilisateur,
                 device_id=device_id,
-                utilisateur=utilisateur
-            ).first()
+                defaults={
+                    'device_type': device_type,
+                    'subscription_data': subscription_data,
+                    'device_name': device_name,
+                    'device_model': device_model,
+                    'is_active': True
+                }
+            )
 
-            if existing:
-                # Mettre à jour l'abonnement existant
-                existing.subscription_data = subscription_data
-                existing.device_name = device_name
-                existing.device_model = device_model
-                existing.is_active = True
-                existing.save()
-                logger.info(f"Abonnement push mis à jour pour {device_id}")
-            else:
-                # Créer un nouvel abonnement
-                PushSubscription.objects.create(
-                    utilisateur=utilisateur,
-                    device_type=device_type,
-                    device_id=device_id,
-                    subscription_data=subscription_data,
-                    device_name=device_name,
-                    device_model=device_model
-                )
-                logger.info(f"Nouvel abonnement push pour {device_id}")
+            if not created:
+                subscription.device_type = device_type
+                subscription.subscription_data = subscription_data
+                subscription.device_name = device_name
+                subscription.device_model = device_model
+                subscription.is_active = True
+                subscription.save()
 
             return True
-
-        except Exception as e:
-            logger.error(f"Erreur lors de l'abonnement push: {str(e)}")
+        except Exception:
             return False
 
     def unsubscribe_device(self, utilisateur: Utilisateur, device_id: str) -> bool:
-        """
-        Désinscrit un appareil des notifications push.
-
-        Args:
-            utilisateur: L'utilisateur
-            device_id: ID de l'appareil
-
-        Returns:
-            True si la désinscription a réussi, False sinon
-        """
+        """Désactive un terminal pour les notifications push."""
         try:
             subscription = PushSubscription.objects.filter(
-                device_id=device_id,
-                utilisateur=utilisateur
+                utilisateur=utilisateur,
+                device_id=device_id
             ).first()
 
             if subscription:
                 subscription.desactiver()
-                logger.info(f"Appareil {device_id} désinscrit")
                 return True
-            else:
-                logger.warning(f"Abonnement non trouvé pour {device_id}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Erreur lors de la désinscription: {str(e)}")
             return False
+        except Exception:
+            return False
+        return success

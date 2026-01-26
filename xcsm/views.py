@@ -183,15 +183,85 @@
 
 
 # xcsm/views.py - Version complète avec consultation JSON
-from rest_framework import generics, status
+from rest_framework import generics, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.views import APIView
 
-from .models import FichierSource, Cours, Granule
-from .serializers import FichierSourceSerializer
+from .models import FichierSource, Cours, Granule, ActionLog, Evaluation, Correction
+from .serializers import FichierSourceSerializer, ActionLogSerializer, CoursSerializer, EvaluationSerializer, CorrectionSerializer
+from .permissions import IsEnseignant
+from .processing import process_and_store_document
+from .json_utils import (
+    get_fichier_json_structure, 
+    get_granule_content,
+    get_cours_complete_structure,
+    search_in_granules,
+    get_statistics
+)
+
+class CoursViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet pour la gestion des cours.
+    UC09a/11a/12a
+    """
+    serializer_class = CoursSerializer
+    permission_classes = [IsAuthenticated, IsEnseignant]
+
+    def get_queryset(self):
+        if self.request.user.type_compte == 'ETUDIANT':
+            # Les étudiants ne voient que les cours publiés
+            return Cours.objects.filter(est_publie=True)
+        return Cours.objects.filter(enseignant__utilisateur=self.request.user)
+
+    @action(detail=True, methods=['post'], url_path='publish')
+    def publish(self, request, pk=None):
+        """ UC12a: Publier un cours """
+        cours = self.get_object()
+        # Validation UC12a: Min 5 granulés recommandés (ou requis selon interprétation)
+        # On vérifie la profondeur via SousSection > Granule
+        nb_granules = Granule.objects.filter(sous_section__section__chapitre__partie__cours=cours).count()
+        
+        if nb_granules < 5:
+            return Response(
+                {"error": f"Le cours doit contenir au moins 5 granulés pour être publié (Actuel: {nb_granules})."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        cours.est_publie = True
+        cours.save()
+        return Response({"status": "Cours publié avec succès."})
+
+
+class EvaluationViewSet(viewsets.ModelViewSet):
+    """ UC09b/11b/12b """
+    serializer_class = EvaluationSerializer
+    permission_classes = [IsAuthenticated, IsEnseignant]
+
+    def get_queryset(self):
+        return Evaluation.objects.filter(cours__enseignant__utilisateur=self.request.user)
+
+    @action(detail=True, methods=['post'], url_path='publish')
+    def publish(self, request, pk=None):
+        eval_obj = self.get_object()
+        if not eval_obj.cours.est_publie:
+            return Response({"error": "Le cours associé doit être publié avant l'évaluation."}, status=status.HTTP_400_BAD_REQUEST)
+        eval_obj.est_publie = True
+        eval_obj.date_publication = timezone.now()
+        eval_obj.save()
+        return Response({"status": "Évaluation publiée."})
+
+
+class CorrectionViewSet(viewsets.ModelViewSet):
+    """ UC09c/11c/12c """
+    serializer_class = CorrectionSerializer
+    permission_classes = [IsAuthenticated, IsEnseignant]
+
+    def get_queryset(self):
+        return Correction.objects.filter(evaluation__cours__enseignant__utilisateur=self.request.user)
 from .permissions import IsEnseignant
 from .processing import process_and_store_document
 from .json_utils import (
@@ -228,10 +298,9 @@ class DocumentUploadView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         user = self.request.user
-        try:
-            enseignant = user.profil_enseignant
-        except Exception:
-            raise PermissionDenied("L'utilisateur connecté n'est pas un enseignant.")
+        enseignant = getattr(self.request.user, 'profil_enseignant', None)
+        if not enseignant:
+            raise PermissionDenied("L'utilisateur n'est pas un enseignant.")
         
         serializer.save(enseignant=enseignant, statut_traitement='EN_ATTENTE')
 
@@ -266,6 +335,32 @@ class DocumentUploadView(generics.CreateAPIView):
                 }, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class FichierSourceViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet pour la gestion des fichiers sources.
+    UC06: Consulter liste des uploads.
+    UC07: Supprimer un document.
+    """
+    serializer_class = FichierSourceSerializer
+    permission_classes = [IsAuthenticated, IsEnseignant]
+
+    def get_queryset(self):
+        # Un enseignant ne voit que ses propres uploads
+        return FichierSource.objects.filter(enseignant__utilisateur=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        # UC07: Vérifier les dépendances avant suppression
+        instance = self.get_object()
+        
+        # Vérifier si des granules issus de ce fichier sont utilisés dans des cours publiés
+        granules_ids = instance.granules_extraits.values_list('id', flat=True)
+        # On pourrait complexifier ici en vérifiant les jointures avec Cours/Partie/...
+        # Mais pour cette phase, on applique la suppression en cascade demandée.
+        
+        # Log de suppression (déjà géré par le signal post_delete)
+        return super().destroy(request, *args, **kwargs)
 
 
 # ==============================================================================
@@ -329,44 +424,72 @@ class FichierJsonStructureView(APIView):
 # 3. CONSULTATION D'UN GRANULE INDIVIDUEL
 # ==============================================================================
 
+    @action(detail=True, methods=['post'], url_path='publish')
+    def publish(self, request, pk=None):
+        cr = self.get_object()
+        if not cr.evaluation.est_publie:
+            return Response({"error": "L'évaluation associée doit être publiée."}, status=status.HTTP_400_BAD_REQUEST)
+        cr.est_publie = True
+        cr.save()
+        return Response({"status": "Correction publiée."})
+
+
 class GranuleDetailView(APIView):
     """
-    Récupère le contenu JSON d'un granule spécifique depuis MongoDB.
-    URL: GET /api/v1/granules/<uuid:granule_id>/
-    
-    Réponse:
-        - granule_info: Métadonnées MySQL
-        - contenu_json: Contenu complet depuis MongoDB
+    Récupère ou modifie le contenu d'un granule.
+    UC10: Corriger granulés.
     """
     permission_classes = [IsAuthenticated]
     
-    def get(self, request, granule_id):
+    def get_object(self, granule_id):
         try:
-            granule = Granule.objects.select_related(
-                'sous_section__section__chapitre__partie__cours',
-                'fichier_source'
-            ).get(id=granule_id)
+            return Granule.objects.get(id=granule_id)
         except Granule.DoesNotExist:
-            return Response(
-                {"error": "Granule introuvable"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return None
+
+    def get(self, request, granule_id):
+        granule = self.get_object(granule_id)
+        if not granule:
+            return Response({"error": "Granule introuvable"}, status=status.HTTP_404_NOT_FOUND)
         
-        # Récupération du contenu MongoDB
         contenu_json = get_granule_content(granule.mongo_contenu_id)
-        
         return Response({
             "granule_info": {
                 "id": str(granule.id),
                 "titre": granule.titre,
                 "type": granule.type_contenu,
-                "ordre": granule.ordre,
-                "sous_section": granule.sous_section.titre,
-                "section": granule.sous_section.section.titre,
-                "chapitre": granule.sous_section.section.chapitre.titre
+                "ordre": granule.ordre
             },
             "contenu_json": contenu_json
         })
+
+    def put(self, request, granule_id):
+        return self.patch(request, granule_id)
+
+    def patch(self, request, granule_id):
+        granule = self.get_object(granule_id)
+        if not granule:
+            return Response({"error": "Granule introuvable"}, status=status.HTTP_404_NOT_FOUND)
+            
+        # Vérification propriétaire (via FichierSource)
+        if not request.user.is_staff and granule.fichier_source.enseignant.utilisateur != request.user:
+            return Response({"error": "Non autorisé"}, status=status.HTTP_403_FORBIDDEN)
+
+        # 1. Mise à jour Métadonnées MySQL
+        if 'titre' in request.data:
+            granule.titre = request.data['titre']
+        if 'ordre' in request.data:
+            granule.ordre = request.data['ordre']
+        granule.save()
+
+        # 2. Mise à jour MongoDB
+        from .json_utils import update_granule_content
+        # On passe tout le corps de la requête à Mongo (content, html, etc.)
+        success = update_granule_content(granule.mongo_contenu_id, request.data)
+        
+        if success:
+            return Response({"message": "Granule mis à jour avec succès"})
+        return Response({"error": "Erreur lors de la mise à jour MongoDB"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ==============================================================================
@@ -481,3 +604,135 @@ class MongoStatisticsView(APIView):
         stats = get_statistics()
         
         return Response(stats)
+
+
+from rest_framework import viewsets
+
+class ActionLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet pour la consultation de l'historique des actions.
+    UC08: Consulter historique.
+    """
+    serializer_class = ActionLogSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.type_compte == 'ADMIN':
+            return ActionLog.objects.all()
+        return ActionLog.objects.filter(utilisateur=user)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        
+        action_type = request.query_params.get('action_type')
+        if action_type:
+            queryset = queryset.filter(action_type=action_type)
+            
+        period = request.query_params.get('period')
+        if period == '7':
+            queryset = queryset.filter(timestamp__gte=timezone.now() - timezone.timedelta(days=7))
+        elif period == '30':
+            queryset = queryset.filter(timestamp__gte=timezone.now() - timezone.timedelta(days=30))
+            
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+class StudentPortalView(APIView):
+    """
+    Vue unifiée pour les étudiants.
+    UC13: Consulter documents.
+    Retourne les Cours, Évaluations et Corrections publiés et adaptés au niveau/filière.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        # Par défaut, on filtre par le profil de l'étudiant (si c'est un étudiant)
+        # Sinon (Enseignant/Admin), on peut voir tout ce qui est publié.
+        
+        niveau = request.query_params.get('niveau')
+        filiere = request.query_params.get('filiere')
+        doc_type = request.query_params.get('type') # 'cours', 'eval', 'corr'
+
+        if not niveau and hasattr(user, 'profil_etudiant'):
+            niveau = user.profil_etudiant.niveau
+        if not filiere and hasattr(user, 'profil_etudiant'):
+            filiere = user.profil_etudiant.filiere
+
+        results = []
+
+        # 1. Récupération des COURS
+        if not doc_type or doc_type == 'cours':
+            cours_qs = Cours.objects.filter(est_publie=True)
+            if niveau: cours_qs = cours_qs.filter(niveau=niveau)
+            if filiere: cours_qs = cours_qs.filter(filiere__icontains=filiere)
+            
+            for c in cours_qs:
+                results.append({
+                    'id': str(c.id),
+                    'titre': c.titre,
+                    'code': c.code,
+                    'type': 'Cours',
+                    'badge_color': 'blue',
+                    'enseignant': c.enseignant.utilisateur.get_full_name() or c.enseignant.utilisateur.username,
+                    'description': c.description[:200],
+                    'nb_granules': Granule.objects.filter(sous_section__section__chapitre__partie__cours=c).count(),
+                    'date_publication': c.date_creation, # à affiner si champ dédié
+                    'statut_acces': 'Accessible'
+                })
+
+        # 2. Récupération des EVALUATIONS
+        if not doc_type or doc_type == 'eval':
+            eval_qs = Evaluation.objects.filter(est_publie=True)
+            if niveau: eval_qs = eval_qs.filter(cours__niveau=niveau)
+            
+            for e in eval_qs:
+                results.append({
+                    'id': str(e.id),
+                    'titre': e.titre,
+                    'code': e.code,
+                    'type': 'Evaluation',
+                    'badge_color': 'orange',
+                    'enseignant': e.cours.enseignant.utilisateur.get_full_name(),
+                    'description': e.description[:200],
+                    'duree': e.duree,
+                    'date_publication': e.date_publication,
+                    'statut_acces': 'Accessible'
+                })
+
+        # 3. Récupération des CORRECTIONS
+        if not doc_type or doc_type == 'corr':
+            corr_qs = Correction.objects.filter(est_publie=True)
+            if niveau: corr_qs = corr_qs.filter(evaluation__cours__niveau=niveau)
+            
+            for cr in corr_qs:
+                results.append({
+                    'id': str(cr.id),
+                    'titre': cr.titre,
+                    'code': cr.code,
+                    'type': 'Correction',
+                    'badge_color': 'green',
+                    'enseignant': cr.evaluation.cours.enseignant.utilisateur.get_full_name(),
+                    'date_publication': cr.date_creation,
+                    'statut_acces': 'Accessible'
+                })
+
+        # Tri par date de publication (décroissant)
+        results.sort(key=lambda x: x.get('date_publication') or timezone.now(), reverse=True)
+
+        return Response({
+            "count": len(results),
+            "results": results,
+            "filters_applied": {
+                "niveau": niveau,
+                "filiere": filiere,
+                "type": doc_type
+            }
+        })

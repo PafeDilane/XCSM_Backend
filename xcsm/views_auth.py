@@ -1,9 +1,10 @@
 """
 Vues d'authentification JWT pour XCSM.
 
-Ce fichier contient toutes les vues liées à l'authentification et au profil utilisateur,
-y compris la connexion, l'inscription, la gestion des tokens JWT, la consultation du profil,
-le changement de mot de passe, ainsi que la suppression et désactivation de compte.
+Ce fichier orchestre la logique d'accès à la plateforme : 
+- Inscription avec création automatique de profils métiers.
+- Connexion sécurisée via tokens JWT.
+- Gestion du cycle de vie du compte (Profil, Mot de passe, Désactivation, Suppression).
 """
 
 from rest_framework import generics, status, permissions
@@ -15,13 +16,22 @@ from django.contrib.auth import authenticate, logout
 from django.utils import timezone
 from django.conf import settings
 
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from django.core.mail import send_mail
+
 from .serializers import (
     CustomTokenObtainPairSerializer,
     UserRegistrationSerializer,
     UserProfileSerializer,
     EnseignantProfileSerializer,
     EtudiantProfileSerializer,
-    AdministrateurProfileSerializer
+    AdministrateurProfileSerializer,
+    AccountDeletionSerializer,
+    AccountDeactivationSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetConfirmSerializer
 )
 from .models import Utilisateur, Enseignant, Etudiant, Administrateur
 
@@ -31,26 +41,25 @@ from .models import Utilisateur, Enseignant, Etudiant, Administrateur
 
 class LoginView(generics.GenericAPIView):
     """
-    Vue de connexion personnalisée avec JWT.
-
-    URL: POST /api/v1/auth/login/
-    Permissions: Autorisé à tous
+    Vue de connexion (Login).
+    Utilise 'CustomTokenObtainPairSerializer' pour retourner les tokens
+    ainsi que les informations de base de l'utilisateur en une seule requête.
     """
     serializer_class = CustomTokenObtainPairSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.AllowAny] # Ouvert à tous
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        # Retourne Access Token + Refresh Token + Infos User
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
 
 class RegisterView(generics.CreateAPIView):
     """
-    Vue d'inscription pour les nouveaux utilisateurs.
-
-    URL: POST /api/v1/auth/register/
-    Permissions: Autorisé à tous
+    Vue d'inscription (Inscription).
+    Crée un compte utilisateur et déclenche automatiquement (via signaux) 
+    la création du profil métier (Enseignant/Etudiant) et l'envoi de l'email de bienvenue.
     """
     serializer_class = UserRegistrationSerializer
     permission_classes = [permissions.AllowAny]
@@ -61,10 +70,10 @@ class RegisterView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         user = self.perform_create(serializer)
 
-        # Génération des tokens JWT
+        # On connecte immédiatement l'utilisateur après inscription en générant ses tokens
         refresh = RefreshToken.for_user(user)
 
-        # Construction de la réponse avec informations utilisateur
+        # Préparation du dictionnaire de réponse complet
         data = {
             'refresh': str(refresh),
             'access': str(refresh.access_token),
@@ -79,7 +88,7 @@ class RegisterView(generics.CreateAPIView):
             }
         }
 
-        # Ajout des informations de profil spécifiques
+        # Injection dynamique des informations de profil selon le rôle
         try:
             if user.type_compte == 'ENSEIGNANT':
                 data['user']['enseignant'] = {
@@ -97,7 +106,8 @@ class RegisterView(generics.CreateAPIView):
                     'role_admin': user.profil_admin.role_admin,
                     'permissions': user.profil_admin.permissions
                 }
-        except:
+        except Exception:
+            # En cas de problème de lecture du profil, on renvoie les données de base
             pass
 
         headers = self.get_success_headers(serializer.data)
@@ -109,20 +119,16 @@ class RegisterView(generics.CreateAPIView):
 
 class RefreshTokenView(TokenRefreshView):
     """
-    Vue pour rafraîchir un token JWT expiré.
-
-    URL: POST /api/v1/auth/refresh/
-    Permissions: Autorisé à tous
+    Vue de rafraîchissement. Permet d'obtenir un nouvel 'access token' 
+    sans redemander les identifiants, tant que le 'refresh token' est valide.
     """
     permission_classes = [permissions.AllowAny]
 
 
 class LogoutView(APIView):
     """
-    Vue de déconnexion. Permet de blacklister le refresh token.
-
-    URL: POST /api/v1/auth/logout/
-    Permissions: Utilisateur authentifié
+    Vue de déconnexion. 
+    Invalide le refresh token en le plaçant dans la 'blacklist' côté serveur.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -133,12 +139,12 @@ class LogoutView(APIView):
                 return Response({"error": "Refresh token requis"}, status=status.HTTP_400_BAD_REQUEST)
 
             token = RefreshToken(refresh_token)
-            token.blacklist()
+            token.blacklist() # Rend le token inutilisable pour de futurs refreshs
 
             return Response({"message": "Déconnexion réussie"}, status=status.HTTP_200_OK)
 
         except Exception as e:
-            return Response({"error": "Token invalide", "detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Token invalide ou déjà expiré", "detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 # =============================================================================
@@ -147,23 +153,23 @@ class LogoutView(APIView):
 
 class UserProfileView(generics.RetrieveUpdateAPIView):
     """
-    Vue pour consulter et mettre à jour le profil utilisateur.
-
-    URL: GET/PUT /api/v1/auth/profile/
-    Permissions: Utilisateur authentifié
+    Vue de gestion du profil personnel.
+    Permet de lire (GET) ou mettre à jour (PUT/PATCH) les infos de base et métier.
     """
     serializer_class = UserProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_object(self):
+        # On retourne toujours l'utilisateur connecté
         return self.request.user
 
     def get(self, request, *args, **kwargs):
+        """Récupère les infos utilisateur agrégées avec son profil spécifique."""
         user = self.get_object()
         serializer = self.get_serializer(user)
         response_data = serializer.data
 
-        # Ajout des données de profil spécifiques
+        # Ajout des données de profil spécifiques selon le rôle
         try:
             if user.type_compte == 'ENSEIGNANT':
                 profile_serializer = EnseignantProfileSerializer(user.profil_enseignant)
@@ -174,19 +180,21 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             elif user.type_compte == 'ADMIN':
                 profile_serializer = AdministrateurProfileSerializer(user.profil_admin)
                 response_data['admin_profile'] = profile_serializer.data
-        except:
+        except Exception:
             pass
 
         return Response(response_data)
 
     def update(self, request, *args, **kwargs):
+        """Met à jour les informations de base et délégue la mise à jour des profils métiers."""
         partial = kwargs.pop('partial', False)
         user = self.get_object()
         serializer = self.get_serializer(user, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
 
-        # Mise à jour du profil spécifique si fourni
+        # Mise à jour des profils imbriqués (Logique manuelle car DRF ne gère pas nativement
+        # les mises à jour imbriquées sur des relations inverses 1-1 sans config complexe)
         try:
             if user.type_compte == 'ENSEIGNANT' and 'enseignant_profile' in request.data:
                 profile_serializer = EnseignantProfileSerializer(
@@ -212,7 +220,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
                 )
                 if profile_serializer.is_valid():
                     profile_serializer.save()
-        except:
+        except Exception:
             pass
 
         return Response(serializer.data)
@@ -220,10 +228,8 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
 
 class ChangePasswordView(generics.UpdateAPIView):
     """
-    Vue pour changer le mot de passe utilisateur.
-
-    URL: PUT /api/v1/auth/change-password/
-    Permissions: Utilisateur authentifié
+    Vue de changement sécurisé du mot de passe.
+    Nécessite la validation de l'ancien mot de passe.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -233,6 +239,7 @@ class ChangePasswordView(generics.UpdateAPIView):
         new_password = request.data.get("new_password")
         confirm_password = request.data.get("confirm_password")
 
+        # Vérifications de sécurité
         if not user.check_password(old_password):
             return Response({"error": "Ancien mot de passe incorrect"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -242,6 +249,7 @@ class ChangePasswordView(generics.UpdateAPIView):
         if len(new_password) < 8:
             return Response({"error": "Le mot de passe doit contenir au moins 8 caractères"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Changement effectif
         user.set_password(new_password)
         user.save()
 
@@ -250,10 +258,8 @@ class ChangePasswordView(generics.UpdateAPIView):
 
 class VerifyTokenView(APIView):
     """
-    Vue pour vérifier la validité d'un token JWT.
-
-    URL: GET /api/v1/auth/verify/
-    Permissions: Utilisateur authentifié
+    Vue utilitaire pour le Frontend.
+    Permet de vérifier si le token stocké localement est toujours valide et pour quel utilisateur.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -274,10 +280,8 @@ class VerifyTokenView(APIView):
 
 class DeleteAccountView(generics.DestroyAPIView):
     """
-    Vue pour supprimer définitivement le compte utilisateur.
-
-    URL: DELETE /api/v1/auth/delete-account/
-    Permissions: Utilisateur authentifié
+    Vue critique de suppression de compte (Conformité RGPD).
+    Efface les données personnelles, anonymise les journaux et révoque les tokens.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -286,146 +290,183 @@ class DeleteAccountView(generics.DestroyAPIView):
         password = request.data.get('password')
         confirmation = request.data.get('confirmation')
 
+        # Double validation (Mot de passe + Phrase de sécurité)
         if not password:
-            return Response({"error": "Le mot de passe actuel est requis pour confirmer la suppression."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Le mot de passe actuel est requis pour cette action."}, status=status.HTTP_400_BAD_REQUEST)
 
         if confirmation != "JE_SUPPRIME_MON_COMPTE":
-            return Response({"error": "Vous devez écrire 'JE_SUPPRIME_MON_COMPTE' pour confirmer la suppression."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Phrase de confirmation incorrecte."}, status=status.HTTP_400_BAD_REQUEST)
 
         if not user.check_password(password):
             return Response({"error": "Mot de passe incorrect."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
+            # 1. Journalisation (sans données privées)
             self._log_account_deletion(user)
+            # 2. Sauvegarde des stats d'usage avant suppression
             self._archive_user_data(user)
+            # 3. Nettoyage des références (anonymisation)
             self._anonymize_user_data(user)
+            # 4. Blocage des accès
             self._invalidate_jwt_tokens(user)
+            
+            # 5. Suppression réelle de l'objet utilisateur
             user.delete()
             logout(request)
 
             return Response({
-                "message": "Votre compte a été supprimé avec succès.",
-                "deletion_date": timezone.now().isoformat(),
-                "note": "Toutes vos données personnelles ont été supprimées conformément au RGPD."
+                "message": "Votre compte a été supprimé définitivement.",
+                "note": "Vos données personnelles ont été traitées selon les règles de confidentialité."
             }, status=status.HTTP_200_OK)
         except Exception as e:
-            return Response({"error": f"Une erreur est survenue lors de la suppression : {str(e)}"},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": f"Erreur système lors de la suppression : {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # Méthodes privées pour journalisation, archivage, anonymisation et invalidation des tokens
     def _log_account_deletion(self, user):
+        """Enregistre l'événement pour l'audit admin."""
         import logging
         logger = logging.getLogger('xcsm.auth')
-        logger.warning(f"Compte supprimé - Utilisateur: {user.username}, ID: {user.id}, Email: {user.email}, "
-                       f"Rôle: {user.type_compte}, Date: {timezone.now()}")
+        logger.warning(f"ACTION: Suppression de compte - ID: {user.id}, Date: {timezone.now()}")
 
     def _archive_user_data(self, user):
+        """Génère un rapport JSON des activités avant suppression."""
         from .models import FichierSource, Cours
         import json
         import os
 
+        # Chemin de stockage sécurisé
         archive_dir = os.path.join(settings.MEDIA_ROOT, 'archives', 'deleted_accounts')
         os.makedirs(archive_dir, exist_ok=True)
 
-        archive_file = os.path.join(
-            archive_dir,
-            f"user_{user.id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.json"
-        )
+        archive_file = os.path.join(archive_dir, f"backup_{user.id}_{timezone.now().strftime('%Y%m%d')}.json")
 
-        archive_data = {
+        stats = {
             "user_id": str(user.id),
-            "username": user.username,
-            "email": user.email,
             "type_compte": user.type_compte,
-            "date_creation": user.date_creation.isoformat() if hasattr(user, 'date_creation') else None,
             "deletion_date": timezone.now().isoformat(),
-            "statistics": {
-                "documents_count": FichierSource.objects.filter(enseignant__utilisateur=user).count(),
-                "courses_count": Cours.objects.filter(enseignant__utilisateur=user).count(),
+            "activity": {
+                "uploads": FichierSource.objects.filter(enseignant__utilisateur=user).count(),
+                "courses": Cours.objects.filter(enseignant__utilisateur=user).count(),
             }
         }
 
         with open(archive_file, 'w', encoding='utf-8') as f:
-            json.dump(archive_data, f, indent=2, ensure_ascii=False)
+            json.dump(stats, f, indent=2)
 
     def _anonymize_user_data(self, user):
+        """Détache les liens vers les notifications pour éviter les erreurs d'intégrité."""
         try:
-            user.username = f"deleted_user_{user.id}"
-            user.email = f"deleted_{user.id}@deleted.xcsm"
-            user.first_name = "Utilisateur"
-            user.last_name = "Supprimé"
-            user.telephone = None if hasattr(user, 'telephone') else None
-            user.photo_url = None if hasattr(user, 'photo_url') else None
-            user.save()
-
-            from .models import Notification
-            Notification.objects.filter(utilisateur=user).update(
-                utilisateur=None,
-                envoyee_email=False,
-                envoyee_push=False
-            )
-
-        except Exception as e:
-            import logging
-            logger = logging.getLogger('xcsm.auth')
-            logger.error(f"Erreur lors de l'anonymisation: {str(e)}")
+            from .notifications.models import Notification
+            # On conserve les notifications mais on retire le lien avec l'utilisateur
+            Notification.objects.filter(utilisateur=user).update(utilisateur=None)
+        except Exception:
+            pass
 
     def _invalidate_jwt_tokens(self, user):
+        """Révoque tous les tokens actifs pour cet utilisateur."""
         try:
             from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
             tokens = OutstandingToken.objects.filter(user=user)
             for token in tokens:
                 BlacklistedToken.objects.get_or_create(token=token)
-        except ImportError:
+        except Exception:
             pass
-        except Exception as e:
-            import logging
-            logger = logging.getLogger('xcsm.auth')
-            logger.error(f"Erreur lors de l'invalidation des tokens: {str(e)}")
 
 
 class DeactivateAccountView(generics.UpdateAPIView):
     """
-    Vue pour désactiver temporairement un compte utilisateur.
-
-    URL: PUT /api/v1/auth/deactivate-account/
-    Permissions: Utilisateur authentifié
+    Vue de désactivation temporaire.
+    L'utilisateur ne peut plus se connecter, mais ses données sont conservées intactes.
+    Une intervention admin est nécessaire pour la réactivation.
     """
     permission_classes = [permissions.IsAuthenticated]
 
     def put(self, request, *args, **kwargs):
         user = request.user
         password = request.data.get('password')
-        reason = request.data.get('reason', 'Aucune raison fournie')
-
-        if not password:
-            return Response({"error": "Le mot de passe est requis pour confirmer la désactivation."},
-                            status=status.HTTP_400_BAD_REQUEST)
+        reason = request.data.get('reason', 'Non précisé')
 
         if not user.check_password(password):
             return Response({"error": "Mot de passe incorrect."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # Désactivation du compte
-            user.is_active = False
+            user.is_active = False # Le verrou natif de Django
             user.save()
 
             import logging
             logger = logging.getLogger('xcsm.auth')
-            logger.info(f"Compte désactivé - User: {user.username}, Reason: {reason}, Date: {timezone.now()}")
+            logger.info(f"Compte désactivé - User: {user.username}, Motif: {reason}")
 
-            # Déconnexion
-            logout(request)
+            logout(request) # On termine la session actuelle
 
             return Response({
-                "message": "Votre compte a été désactivé avec succès.",
-                "deactivation_date": timezone.now().isoformat(),
-                "reactivation_info": "Contactez l'administrateur pour réactiver votre compte.",
-                "note": "Vos données sont conservées mais vous ne pouvez plus vous connecter."
+                "message": "Compte désactivé. Vos données restent disponibles mais l'accès est bloqué.",
+                "reactivation": "Veuillez contacter le support pour une réactivation."
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            return Response({"error": f"Erreur lors de la désactivation : {str(e)}"},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": f"Erreur lors de la désactivation : {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =============================================================================
+# SECTION 3 : RÉCUPÉRATION DE MOT DE PASSE (UC03)
+# =============================================================================
+
+class PasswordResetRequestView(generics.GenericAPIView):
+    """
+    Vue pour demander la réinitialisation du mot de passe.
+    """
+    serializer_class = PasswordResetRequestSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data['email']
+        user = Utilisateur.objects.get(email=email)
+
+        token = default_token_generator.make_token(user)
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+
+        # Envoi de l'email
+        reset_link = f"{getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')}/reset-password/{uid}/{token}/"
+        
+        try:
+            send_mail(
+                subject="[XCSM] Réinitialisation de votre mot de passe",
+                message=f"Bonjour {user.username},\n\nUtilisez le lien suivant pour réinitialiser votre mot de passe (valide 1h) :\n{reset_link}\n\nSi vous n'avez pas demandé cette action, ignorez cet email.",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=False,
+            )
+            return Response({"detail": "Un email de réinitialisation a été envoyé."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": "Erreur d'envoi.", "detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class PasswordResetConfirmView(generics.GenericAPIView):
+    """
+    Vue pour confirmer la réinitialisation.
+    """
+    serializer_class = PasswordResetConfirmSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        uidb64 = serializer.validated_data['uidb64']
+        token = serializer.validated_data['token']
+        new_password = serializer.validated_data['new_password']
+
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = Utilisateur.objects.get(pk=uid)
+        except:
+            return Response({"error": "Lien invalide."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if default_token_generator.check_token(user, token):
+            user.set_password(new_password)
+            user.save()
+            return Response({"detail": "Mot de passe réinitialisé."}, status=status.HTTP_200_OK)
+        else:
+            return Response({"error": "Token invalide."}, status=status.HTTP_400_BAD_REQUEST)

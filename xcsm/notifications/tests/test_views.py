@@ -50,9 +50,9 @@ class NotificationViewSetTest(APITestCase):
             type_compte='ETUDIANT'
         )
 
-        # Créer des préférences de notification
-        NotificationPreference.objects.create(utilisateur=self.teacher_user)
-        NotificationPreference.objects.create(utilisateur=self.student_user)
+        # Créer les préférences de notification
+        NotificationPreference.objects.get_or_create(utilisateur=self.teacher_user)
+        NotificationPreference.objects.get_or_create(utilisateur=self.student_user)
 
         # Créer des notifications de test
         self.notification1 = Notification.objects.create(
@@ -309,13 +309,12 @@ class NotificationPreferenceViewSetTest(APITestCase):
             is_staff=True
         )
 
-        # Créer des préférences
-        self.preference = NotificationPreference.objects.create(
-            utilisateur=self.user,
-            document_traite_email=True,
-            document_traite_push=False,
-            digest_frequency=24
-        )
+        # Récupérer et configurer les préférences (créées par signal)
+        self.preference = NotificationPreference.objects.get(utilisateur=self.user)
+        self.preference.document_traite_email = True
+        self.preference.document_traite_push = False
+        self.preference.digest_frequency = 24
+        self.preference.save()
 
         self.client = APIClient()
 
@@ -826,7 +825,7 @@ class BulkNotificationCreateViewTest(APITestCase):
         response = self.client.post(url, data, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('non_existent_ids', str(response.data))
+        self.assertIn('non trouvés', str(response.data))
 
 
 class NotificationStatsViewTest(APITestCase):
